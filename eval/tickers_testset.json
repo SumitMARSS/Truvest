@@ -1,0 +1,22 @@
+[
+  {"ticker": "RELIANCE.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "TCS.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "INFY.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "HDFCBANK.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "ICICIBANK.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "SBIN.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "BHARTIARTL.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "ITC.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "LT.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "HINDUNILVR.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "BAJFINANCE.NS", "pe_tolerance": 8.0, "min_sources": 2},
+  {"ticker": "AXISBANK.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "KOTAKBANK.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "MARUTI.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "ASIANPAINT.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "SUNPHARMA.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "WIPRO.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "TATAMOTORS.NS", "pe_tolerance": 8.0, "min_sources": 2},
+  {"ticker": "NTPC.NS", "pe_tolerance": 5.0, "min_sources": 2},
+  {"ticker": "ONGC.NS", "pe_tolerance": 5.0, "min_sources": 2}
+]

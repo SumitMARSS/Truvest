@@ -1,0 +1,40 @@
+# --- Python runtime / caches (heavy — never commit) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+*.egg
+build/
+dist/
+wheels/
+
+# --- Secrets / local config ---
+.env
+.env.*
+!.env.example
+
+# --- Test / lint caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# --- Logs / local data ---
+*.log
+logs/
+data/cache/
+*.sqlite3
+*.db
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
