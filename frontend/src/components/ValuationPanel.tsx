@@ -21,21 +21,21 @@ export function ValuationPanel({
   const { pe_band, sector_pe } = valuation;
 
   return (
-    <section className="rounded-xl border border-line bg-white/70 p-5">
+    <section className="rounded-xl border border-line bg-surface p-5">
       <h3 className="flex items-center gap-2 font-display text-lg font-semibold">
         Valuation context
         <ConfidenceBadge level={pe_band.available ? "high" : undefined} />
       </h3>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink/45">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
             Historical P/E band {pe_band.partial_history && pe_band.available ? "(partial history)" : ""}
           </p>
           {pe_band.available ? (
             <div className="mt-2">
               <div className="flex items-baseline gap-2">
                 <span className="font-display text-2xl font-bold">{fmtPe(currentPe)}</span>
-                <span className="text-sm text-ink/55">current</span>
+                <span className="text-sm text-muted">current</span>
               </div>
               <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-ink/10">
                 {(() => {
@@ -54,12 +54,12 @@ export function ValuationPanel({
                   );
                 })()}
               </div>
-              <div className="mt-1 flex justify-between text-xs text-ink/50">
+              <div className="mt-1 flex justify-between text-xs text-muted">
                 <span>{fmtPe(pe_band.band_min)} low</span>
                 <span>{fmtPe(pe_band.band_avg)} avg</span>
                 <span>{fmtPe(pe_band.band_max)} high</span>
               </div>
-              <p className="mt-2 text-xs text-ink/45">
+              <p className="mt-2 text-xs text-muted">
                 From {pe_band.quarters_used} quarter(s) of price × EPS
                 {pe_band.partial_history && " — fewer than 8 quarters available, band is directional only"}.
               </p>
@@ -72,19 +72,19 @@ export function ValuationPanel({
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink/45">Sector-average P/E</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Sector-average P/E</p>
           {sector_pe.available ? (
             <div className="mt-2">
               <div className="flex items-baseline gap-2">
                 <span className="font-display text-2xl font-bold">{fmtPe(sector_pe.pe)}</span>
-                <span className="text-sm text-ink/55">{sector_pe.sector}</span>
+                <span className="text-sm text-muted">{sector_pe.sector}</span>
               </div>
               {currentPe != null && sector_pe.pe != null && (
                 <p className="mt-1 text-sm text-ink/70">
                   Stock trades at {currentPe > sector_pe.pe ? "a premium to" : "a discount to"} its sector average.
                 </p>
               )}
-              <p className="mt-2 text-xs text-ink/45">
+              <p className="mt-2 text-xs text-muted">
                 As of {sector_pe.as_of} · {sector_pe.source === "static_fallback" ? "static fallback table (NSE pull unavailable)" : `NSE ${sector_pe.index}`}
               </p>
             </div>

@@ -9,8 +9,8 @@ export function SkeletonBlock({ className = "" }: { className?: string }) {
 
 export function SkeletonCard({ title, lines = 3 }: { title: string; lines?: number }) {
   return (
-    <div className="rounded-xl border border-line bg-paper/40 p-4">
-      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink/40">{title}</p>
+    <div className="rounded-xl border border-line bg-elevated p-4">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">{title}</p>
       <div className="space-y-2">
         {Array.from({ length: lines }).map((_, i) => (
           <SkeletonBlock key={i} className={`h-3 ${i === lines - 1 ? "w-2/3" : "w-full"}`} />
@@ -23,7 +23,7 @@ export function SkeletonCard({ title, lines = 3 }: { title: string; lines?: numb
 /** Honest, explicit "this isn't available" state — never a silent blank gap. */
 export function UnavailableNotice({ reason }: { reason?: string | null }) {
   return (
-    <div className="rounded-xl border border-dashed border-line bg-paper/30 p-4 text-sm text-ink/55">
+    <div className="rounded-xl border border-dashed border-line bg-elevated p-4 text-sm text-muted">
       <span className="font-semibold text-ink/70">Unavailable this cycle. </span>
       {reason || "This data source did not respond — never fabricated to fill the gap."}
     </div>

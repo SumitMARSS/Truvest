@@ -51,6 +51,34 @@ class ResearchRequest(BaseModel):
     # UPDATE: add force_refresh, depth (quick|standard|deep)
 
 
+class StockSuggestion(BaseModel):
+    """One ranked candidate from the advanced search (services/stock_search.py).
+
+    `score`/`confidence` are the same trust vocabulary the brief itself uses:
+    high = safe to run without asking, medium = plausible, low = weak.
+    """
+
+    symbol: str = Field(..., description="Bare NSE symbol, e.g. RELIANCE")
+    ticker: str = Field(..., description="yfinance-style ticker, e.g. RELIANCE.NS")
+    name: str
+    exchange: str = "NSE"
+    industry: Optional[str] = None
+    score: float = Field(..., ge=0.0, le=1.0)
+    confidence: ConfidenceLevel = ConfidenceLevel.low
+    match_reason: str = ""
+    # catalog | yahoo | llm — which retrieval layers found this candidate
+    sources: list[str] = Field(default_factory=list)
+
+
+class StockSearchResponse(BaseModel):
+    query: str
+    suggestions: list[StockSuggestion] = Field(default_factory=list)
+    # Which layers actually ran, so the UI can say how the answer was produced
+    layers_used: list[str] = Field(default_factory=list)
+    # Set when the query reads as "A vs B" — lets the UI offer compare mode
+    compare_pair: Optional[list[str]] = None
+
+
 class PriceAction(BaseModel):
     last_price: Optional[float] = None
     currency: Optional[str] = None
@@ -259,5 +287,8 @@ class ResearchJobResponse(BaseModel):
     # ticker_not_found | timeout | internal_error — lets the frontend show a
     # tailored message instead of one generic failure state (docs/AUDIT.md #1.3)
     error_code: Optional[str] = None
+    # Populated on error_code=ticker_not_found: ranked "did you mean" options
+    # so a failed lookup is recoverable in one click instead of a retype.
+    suggestions: list[StockSuggestion] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

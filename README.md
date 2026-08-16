@@ -1,4 +1,4 @@
-# SourceBrief — Stock Research Multi-Agent System
+# Truvest — Stock Research Multi-Agent System
 
 Planner → Workers → Critic multi-agent pipeline that turns an **NSE/BSE ticker or Indian company name** into a **sourced research brief**: multi-horizon price performance, fundamentals, valuation context (historical P/E band + sector average), promoter shareholding with QoQ delta, sector peer comparison, corroborated news sentiment, filings highlights, and flagged risks — every claim linked to a source **and tagged with a confidence level**.
 
@@ -36,6 +36,7 @@ User (React + Vite :3000) → FastAPI (:8000) → job store (Redis or in-memory)
 | **Upgraded news** — RSS-first + multi-source corroboration | ET / Moneycontrol / Livemint / Business Standard RSS; Tavily as supplement | Each feed degrades independently; **<2 independent sources ⇒ sentiment is forced to `insufficient_data`**, never bullish/bearish |
 | **SEBI-safe language pass** — deterministic rewrite + audit log | None (pure logic) | Cannot fail |
 | **Compare mode** — "RELIANCE vs TCS" | Reuses the whole pipeline, twice, concurrently | Either side failing surfaces as a normal job error |
+| **Advanced search** — ranked suggestions with a match score, before you submit | Bundled NSE listing catalog (~2.4k symbols) + curated brand/alias overlay, Yahoo Finance search, LLM only for descriptive questions | Each layer is independent: no network ⇒ local catalog still answers; no LLM key ⇒ everything except "describe it" queries still works |
 
 **Two hard rules enforced in code, not prompts:** no LLM performs arithmetic, and no gap is ever filled with a plausible-looking guess — every unavailable section renders as unavailable and is listed in the brief's `data_gaps`.
 
@@ -45,7 +46,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full state diagram an
 
 | Layer | Choice | Why |
 |-------|--------|-----|
-| Frontend | React 18 + Vite + TypeScript + Tailwind | SPA research UI, performance toggle + price chart |
+| Frontend | React 18 + Vite + TypeScript + Tailwind | Truvest SPA: ranked stock search, performance toggle + price chart |
 | API | FastAPI + Pydantic v2 | Async, typed contracts, OpenAPI docs |
 | Agents | LangGraph + LangChain | Explicit state machine, targeted retries |
 | Jobs | Redis (optional) / in-memory fallback | Job status + brief TTL |
@@ -69,14 +70,20 @@ Stock_Project/
 │   │   ├── tools/           # market_data, news_rss, news_search, india_filings,
 │   │   │                    #   peer_data, shareholding, sector_pe, code_exec
 │   │   ├── services/        # Redis, cache, LLM factory, ticker resolve,
-│   │   │                    #   intent (compare detection), job store
+│   │   │                    #   stock_search (advanced search), intent
+│   │   │                    #   (compare detection), job store
 │   │   ├── models/          # Pydantic schemas
-│   │   ├── data/            # peer_groups.json (curated NSE peer groups)
+│   │   ├── data/            # peer_groups.json (curated NSE peer groups),
+│   │   │                    #   nse_universe.json (generated search catalog),
+│   │   │                    #   stock_aliases.json (curated brand/alias overlay)
 │   │   └── core/            # config, logging, ticker, confidence,
 │   │                        #   compliance_filter, dedup, text_quality
-│   ├── tests/               # 86 tests
+│   ├── scripts/             # build_stock_universe.py (rebuilds the catalog)
+│   ├── tests/               # 113 tests
 │   └── requirements.txt
-├── frontend/                # React (Vite) research brief UI + 14 vitest tests
+├── frontend/                # Truvest UI (React + Vite) + 27 vitest tests
+│                            #   tailwind.config.js holds the whole palette:
+│                            #   ink / paper / surface / accent / warn / danger / line
 ├── eval/                    # Factual accuracy + graceful-degradation harness
 ├── docs/                    # ARCHITECTURE.md, TOOLS.md, AUDIT.md
 ├── docker-compose.yml
@@ -223,12 +230,103 @@ See `eval/tickers_testset.json` and `eval/run_eval.py`.
 |--------|------|-------------|
 | `POST` | `/api/v1/research` | Start job `{ "query": "RELIANCE" }` or `{ "query": "TCS vs INFY" }` |
 | `GET` | `/api/v1/research/{job_id}` | Poll status + `brief` (single) or `compare_brief` (compare) |
+| `GET` | `/api/v1/search?q=&limit=` | Ranked stock suggestions with confidence — typeahead, never 404s on a miss |
 | `GET` | `/api/v1/health` | Health + `llm_provider` / `llm_model` |
 | `GET` | `/docs` | OpenAPI (Swagger) |
 
 Jobs carry `mode` (`single`\|`compare`) and, on failure, a machine-readable
 `error_code` (`ticker_not_found` \| `timeout` \| `internal_error`) so the UI can
-show a tailored message instead of one generic failure state.
+show a tailored message instead of one generic failure state. A
+`ticker_not_found` job also carries `suggestions` — the same ranked candidates
+the search endpoint returns — so a dead end is one click from a rerun.
+
+### Search: how a query becomes candidates
+
+```
+"maggi" / "hul" / "relaince" / "IT companies" / "who makes jaguar cars"
+        ↓
+1. local NSE catalog      symbol · company name · curated alias · brand keyword
+   (offline, ~5ms)        · initials · sector · char-trigram fuzzy for typos
+        ↓ still unsure (top score < 0.90)?
+2. Yahoo Finance search   BSE-only + newly listed names; agreement with layer 1
+                          raises confidence (corroboration, as with news)
+        ↓ still unsure (top score < 0.55) and the query reads like a question?
+3. LLM interpretation     proposes company NAMES only — each is resolved back
+                          through layer 1, so it can never invent a ticker
+```
+
+Every candidate comes back with `score` (0-1), `confidence`
+(`high`\|`medium`\|`low`), `match_reason` ("Known for 'Maggi'", "Closest match
+to your spelling") and the `sources` that found it. Results are cached, so the
+network/LLM layers stay off the hot path for repeat queries.
+
+Rebuild the catalog after NSE listings change:
+
+```bash
+python backend/scripts/build_stock_universe.py   # rewrites app/data/nse_universe.json
+```
+
+Curated aliases and brand keywords live in `app/data/stock_aliases.json` and are
+never touched by that script.
+
+### Look and feel
+
+Truvest ships a **dark theme by default** with a fully designed light theme
+behind a header toggle. Both are driven by one set of CSS variables in
+[`frontend/src/index.css`](frontend/src/index.css), surfaced to components as
+Tailwind tokens in `tailwind.config.js`:
+
+| Token | Role |
+|---|---|
+| `paper` / `surface` / `elevated` | page · cards · inner fills, hover, list rows |
+| `line` | hairline borders |
+| `ink` / `secondary` / `muted` | primary text · supporting copy · labels and captions |
+| `accent` · `success` · `warn` · `danger` | brand teal · positive · caution · negative |
+| `primary` / `onprimary` | primary action surface and its label |
+
+No component hardcodes a colour, so the whole product re-skins from that block.
+The dark palette is `:root`, and light is the opt-in override — a late or
+blocked stylesheet lands on dark rather than flashing white. An inline script in
+`index.html` applies the stored theme **before first paint**, and the choice
+persists in `localStorage`.
+
+Two safeguards exist because a browser holding an **outdated stylesheet** was
+the single worst failure we hit (a dark page wearing light components, with
+unreadable text): the pre-paint background is a plain `<style>` rule rather
+than a scripted inline style, so any stylesheet that loads simply overrides it;
+and every token carries its dark value as a CSS fallback. A stale bundle now
+degrades to an out-of-date *look*, never an unreadable page — and the console
+says so. **Tailwind config changes need a dev-server restart, not just a
+reload.**
+
+Contrast is verified, not assumed: every rendered text node in both themes
+clears WCAG AA for its size (the muted tier is its own token precisely because
+an opacity-mixed grey measured 3.8–4.5:1 on light).
+
+### Search in the UI
+
+The search box (`frontend/src/components/StockSearchInput.tsx`) is a debounced
+combobox: matches appear as you type, each with its confidence, score and the
+reason it matched, and arrow keys / Enter / Escape work as expected.
+
+The results panel is a **normal block in the document flow**, not a floating
+overlay: it renders between the input row and the example chips, so opening it
+grows the card and pushes the content below it down. It cannot overlap the
+chips or the disclaimer, cannot escape the card, and needs no `z-index`. A long
+list scrolls inside its own panel.
+
+Two more rules keep it out of the way:
+
+- **It never opens by itself.** A prefilled value, a value written by a
+  suggestion click, or a remount when you switch tabs is not a question, so it
+  isn't answered with a dropdown. Only typing — or clicking a **Try a search**
+  example — starts a lookup.
+- **It closes while a job is running**, so the list can never hang over the
+  pipeline view.
+
+The **Try a search** chips are examples, not shortcuts: clicking one fills the
+box and shows the ranked matches; picking a match is what starts the research
+job. A job takes minutes, so it is always an explicit choice.
 
 ## Code review findings
 

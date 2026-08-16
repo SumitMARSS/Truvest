@@ -4,7 +4,7 @@ import type { Confidence } from "@/lib/api";
 const STYLES: Record<Confidence, { label: string; classes: string; Icon: typeof ShieldCheck }> = {
   high: { label: "High confidence", classes: "bg-accent/15 text-accent", Icon: ShieldCheck },
   medium: { label: "Medium confidence", classes: "bg-warn/15 text-warn", Icon: ShieldAlert },
-  low: { label: "Low confidence", classes: "bg-ink/10 text-ink/55", Icon: ShieldQuestion },
+  low: { label: "Low confidence", classes: "bg-ink/10 text-secondary", Icon: ShieldQuestion },
 };
 
 /**

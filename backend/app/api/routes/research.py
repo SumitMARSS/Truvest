@@ -8,7 +8,7 @@ from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.core.config import settings
-from app.models.schemas import JobStatus, ResearchJobResponse, ResearchRequest
+from app.models.schemas import JobStatus, ResearchJobResponse, ResearchRequest, StockSuggestion
 from app.services import job_store
 from app.services.intent import detect_compare_intent
 from app.services.ticker_resolve import TickerResolutionError
@@ -109,6 +109,8 @@ async def _execute_job(job_id: str, query: str) -> None:
     except TickerResolutionError as exc:
         # Distinct from an internal failure (docs/AUDIT.md #1.3) — the user
         # mistyped or asked for a ticker we can't resolve, not a bug on our end.
+        # The ranked alternatives ride along so the UI can offer one-click
+        # recovery instead of an apology.
         logger.info("Research job %s: ticker not resolved (%s)", job_id, exc)
         await job_store.update_job(
             job_id,
@@ -116,6 +118,7 @@ async def _execute_job(job_id: str, query: str) -> None:
             progress="ticker_not_found",
             error_code="ticker_not_found",
             error=str(exc),
+            suggestions=[StockSuggestion(**s) for s in getattr(exc, "suggestions", [])],
             updated_at=datetime.utcnow(),
         )
     except Exception as exc:
@@ -179,6 +182,7 @@ async def _execute_compare_job(job_id: str, query_a: str, query_b: str) -> None:
             progress="ticker_not_found",
             error_code="ticker_not_found",
             error=str(exc),
+            suggestions=[StockSuggestion(**s) for s in getattr(exc, "suggestions", [])],
             updated_at=datetime.utcnow(),
         )
     except Exception as exc:

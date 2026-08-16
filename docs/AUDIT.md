@@ -1,4 +1,4 @@
-# Codebase Audit — SourceBrief
+# Codebase Audit — Truvest
 
 Scope: `backend/app/agents/`, `backend/app/tools/`, `backend/app/services/`, `backend/app/api/`, `backend/app/models/`, `frontend/src/`, `backend/tests/`, `eval/`.
 

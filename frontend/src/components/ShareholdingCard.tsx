@@ -14,13 +14,13 @@ export function ShareholdingCard({ shareholding }: { shareholding: Shareholding 
   const flagged = delta != null && delta < 0;
 
   return (
-    <div className={`rounded-xl border p-4 ${flagged ? "border-danger/30 bg-danger/5" : "border-line bg-paper/40"}`}>
-      <p className="text-xs font-semibold uppercase tracking-wide text-ink/45">Promoter holding</p>
+    <div className={`rounded-xl border p-4 ${flagged ? "border-danger/30 bg-danger/5" : "border-line bg-elevated"}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted">Promoter holding</p>
       <div className="mt-2 flex items-baseline gap-3">
         <span className="font-display text-3xl font-bold">{shareholding.promoter_pct}%</span>
         <TrendIndicator value={delta} suffix=" pts QoQ" decimals={2} />
       </div>
-      <p className="mt-2 text-xs text-ink/50">
+      <p className="mt-2 text-xs text-muted">
         As of {shareholding.as_of}
         {shareholding.prior_quarter_date && ` · prior quarter ${shareholding.prior_quarter_date}`}
       </p>

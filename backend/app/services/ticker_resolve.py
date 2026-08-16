@@ -9,6 +9,8 @@ from typing import Optional
 import httpx
 import yfinance as yf
 
+from app.services.stock_search import catalog_exact, local_suggestions
+
 logger = logging.getLogger(__name__)
 
 YAHOO_SEARCH_URL = "https://query1.finance.yahoo.com/v1/finance/search"
@@ -74,7 +76,16 @@ _SUFFIXES = re.compile(r"\b(LTD|LIMITED|PVT|PRIVATE|CO|CORP|INC)\.?$")
 
 
 class TickerResolutionError(ValueError):
-    """Raised when a query cannot be mapped to a live NSE/BSE symbol."""
+    """Raised when a query cannot be mapped to a live NSE/BSE symbol.
+
+    Carries `suggestions` (ranked, offline, from the local NSE catalog) so a
+    dead end is recoverable in one click instead of a retype — a lookup that
+    fails should still tell the user what it *thinks* they meant.
+    """
+
+    def __init__(self, message: str, suggestions: Optional[list[dict]] = None):
+        super().__init__(message)
+        self.suggestions = suggestions or []
 
 
 def _clean_query(query: str) -> str:
@@ -151,6 +162,16 @@ def resolve_ticker(query: str) -> dict[str, Optional[str]]:
     if cleaned in _ALIASES:
         candidates.append(_ALIASES[cleaned])
 
+    # 1b. Bundled NSE catalog (services/stock_search.py) — resolves the ~2.4k
+    # listed symbols, curated short forms ("HUL") and brand names offline, and
+    # covers renames the hardcoded _ALIASES map above has drifted past. Only a
+    # high-confidence hit is used as a candidate here; weaker ones become
+    # "did you mean" suggestions on failure instead of silently researching
+    # the wrong company.
+    catalog_hit = catalog_exact(query)
+    if catalog_hit is not None:
+        candidates.append(catalog_hit.ticker)
+
     # _clean_query splits on dots, so an explicitly-suffixed symbol arrives
     # here as "TCS NS" rather than "TCS.NS". Re-join it BEFORE the
     # single-word test below — this check used to live inside that block,
@@ -199,8 +220,14 @@ def resolve_ticker(query: str) -> dict[str, Optional[str]]:
             "exchange": "BSE" if str(symbol).upper().endswith(".BO") else "NSE",
         }
 
+    suggestions = [s.to_dict() for s in local_suggestions(query, limit=5)]
+    hint = (
+        " Did you mean: " + ", ".join(f"{s['symbol']} ({s['name']})" for s in suggestions[:3]) + "?"
+        if suggestions
+        else " Try the exchange symbol instead (e.g. RELIANCE, TCS, INFY)."
+    )
     raise TickerResolutionError(
         f"Could not resolve '{query}' to a live NSE/BSE symbol. "
-        f"Tried: {', '.join(sorted(seen)) or 'nothing'}. "
-        "Try the exchange symbol instead (e.g. RELIANCE, TCS, INFY)."
+        f"Tried: {', '.join(sorted(seen)) or 'nothing'}." + hint,
+        suggestions=suggestions,
     )

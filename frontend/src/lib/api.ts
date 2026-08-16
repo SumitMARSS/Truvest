@@ -179,6 +179,27 @@ export interface CompareBrief {
   as_of: string;
 }
 
+export interface StockSuggestion {
+  symbol: string;
+  ticker: string;
+  name: string;
+  exchange: string;
+  industry?: string | null;
+  score: number;
+  confidence: Confidence;
+  match_reason: string;
+  /** Which retrieval layers found this candidate: catalog | yahoo | llm */
+  sources: string[];
+}
+
+export interface StockSearchResult {
+  query: string;
+  suggestions: StockSuggestion[];
+  layers_used: string[];
+  /** Set when the text reads as "A vs B" — lets the UI offer compare mode */
+  compare_pair?: [string, string] | null;
+}
+
 export interface ResearchJob {
   job_id: string;
   status: JobStatus;
@@ -189,6 +210,8 @@ export interface ResearchJob {
   compare_brief?: CompareBrief | null;
   error?: string | null;
   error_code?: "ticker_not_found" | "timeout" | "internal_error" | null;
+  /** Ranked "did you mean" options when a ticker could not be resolved */
+  suggestions?: StockSuggestion[];
 }
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -210,6 +233,27 @@ export async function getResearch(jobId: string): Promise<ResearchJob> {
   if (!res.ok) {
     throw new Error(`Failed to fetch job (${res.status})`);
   }
+  return res.json();
+}
+
+/**
+ * Typeahead search. Runs on every (debounced) keystroke, so failures are
+ * returned as an empty result rather than thrown — a flaky suggestion call
+ * must never block the user from submitting what they typed.
+ */
+export async function searchStocks(
+  query: string,
+  limit = 5,
+  signal?: AbortSignal,
+): Promise<StockSearchResult> {
+  const empty: StockSearchResult = { query, suggestions: [], layers_used: [], compare_pair: null };
+  const q = query.trim();
+  if (!q) return empty;
+  const res = await fetch(
+    `${API_URL}/api/v1/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    { signal },
+  );
+  if (!res.ok) return empty;
   return res.json();
 }
 

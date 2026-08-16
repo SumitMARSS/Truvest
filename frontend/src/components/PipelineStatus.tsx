@@ -23,28 +23,30 @@ export function PipelineStatus({ job }: { job: ResearchJob }) {
   const activeIdx = guessStep(progress, job.status);
 
   return (
-    <div className="rounded-2xl border border-line bg-white/50 p-5 shadow-sm">
+    <div className="rounded-xl border border-line bg-surface p-5 shadow-card">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-display text-xl font-semibold">
+        <h2 className="font-display text-base font-semibold tracking-tight">
           {job.mode === "compare" ? "Agent pipeline (both stocks)" : "Agent pipeline"}
         </h2>
-        <span className="text-sm uppercase tracking-wide text-ink/60">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
           {job.status} · {job.progress || "—"}
         </span>
       </div>
-      <ol className="grid gap-2 sm:grid-cols-3 md:grid-cols-6 lg:grid-cols-11">
+      {/* Flex-wrap, not an 11-column grid: fixed columns squeezed the longest
+          labels ("Synthesize") until they overflowed their own chip. */}
+      <ol className="flex flex-wrap gap-1.5">
         {STEPS.map((step, i) => {
           const done = i < activeIdx || job.status === "completed";
           const active = i === activeIdx && job.status === "running";
           return (
             <li
               key={step.id}
-              className={`flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-center text-xs font-semibold uppercase tracking-wide ${
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] ${
                 done
-                  ? "border-accent/40 bg-accent/10 text-accent"
+                  ? "border-accent/30 bg-accent/[0.07] text-accent"
                   : active
-                    ? "border-warn/50 bg-warn/10 text-warn"
-                    : "border-line text-ink/40"
+                    ? "border-warn/40 bg-warn/[0.07] text-warn"
+                    : "border-line bg-elevated text-muted"
               }`}
             >
               {done ? (

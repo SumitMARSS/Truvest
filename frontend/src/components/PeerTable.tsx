@@ -55,7 +55,7 @@ export function PeerTable({ comparison }: { comparison: PeerComparison }) {
     <div className="overflow-x-auto rounded-xl border border-line">
       <table className="w-full min-w-[560px] border-collapse text-sm">
         <thead>
-          <tr className="border-b border-line bg-paper/50 text-left text-xs uppercase tracking-wide text-ink/50">
+          <tr className="border-b border-line bg-elevated text-left text-xs uppercase tracking-wide text-muted">
             {COLUMNS.map((col) => (
               <th key={col.key} className="px-3 py-2 font-semibold">
                 <button
@@ -77,7 +77,7 @@ export function PeerTable({ comparison }: { comparison: PeerComparison }) {
               className={
                 r.is_subject
                   ? "border-b border-line bg-accent/10 font-semibold"
-                  : "border-b border-line last:border-0 hover:bg-paper/40"
+                  : "border-b border-line last:border-0 hover:bg-elevated"
               }
             >
               <td className="px-3 py-2">

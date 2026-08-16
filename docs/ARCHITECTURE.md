@@ -4,7 +4,8 @@
 
 ```
 Browser (React + Vite :3000)
-   POST /api/v1/research { query }
+   GET /api/v1/search?q=… (debounced, per keystroke — see "Search path" below)
+   POST /api/v1/research { query }   ← the symbol the user picked, or raw text
         ↓
 FastAPI (:8000)  →  compare-intent detection (regex, LLM fallback)
         ↓            → job record (Redis, or in-memory fallback), mode=single|compare
@@ -17,6 +18,46 @@ Browser polls GET /api/v1/research/{job_id} every 2s
         ↓
 BriefView / CompareView renders claims + confidence badges + citations
 ```
+
+## Search path (pre-pipeline)
+
+Search runs entirely outside the graph: it is a read-only lookup that must
+answer in milliseconds, while the graph is a multi-minute job. Keeping them
+apart means a burst of typing can never queue research jobs.
+
+```
+GET /api/v1/search?q=…
+        ↓
+services/stock_search.py
+  1. local catalog     data/nse_universe.json (generated from NSE archives)
+     (offline, ~5ms)   + data/stock_aliases.json (curated aliases + brands)
+                       signals: exact symbol · exact name · alias · name prefix
+                       · initials · every-word match · brand keyword · sector
+                       · char-trigram fuzzy (typos)
+        ↓ top score < 0.90
+  2. Yahoo Finance     BSE-only / newly listed names. Agreement between layers
+     search API        is corroboration → +0.05 confidence, same principle the
+                       news worker applies to headlines
+        ↓ top score < 0.55 AND the query reads like a question
+  3. LLM               proposes company NAMES only; each is resolved back
+     interpretation    through layer 1 → a hallucinated ticker is structurally
+                       impossible. Capped at 0.70 (never "high")
+        ↓
+[{symbol, ticker, name, exchange, industry, score, confidence, match_reason,
+  sources}] — cached 6h per query
+```
+
+In the UI the results panel is laid out **in flow** (not as an absolute
+overlay), so it can never cover the surrounding controls; it opens only on an
+explicit request (typing, or a "Try searching" example) and collapses while a
+job runs. Theming is one set of CSS variables → Tailwind tokens, dark by
+default, applied before first paint by an inline script in `index.html`.
+
+`resolve_ticker()` reuses layer 1 before its own network lookups, which is what
+lets renamed symbols (TATAMOTORS → TMCV/TMPV), curated short forms ("HUL") and
+brand names ("maggi") resolve end-to-end. When resolution still fails, the
+ranked candidates are attached to the failed job as `suggestions`, so the UI can
+offer one-click recovery instead of an apology.
 
 ## LangGraph state machine
 
@@ -163,6 +204,7 @@ otherwise. Applied where staleness is cheap and refetching is wasteful:
 | Shareholding pattern | 7 days | Updates ~4×/year |
 | Sector P/E (live) | 1 day | Barely moves intraday |
 | Sector P/E (static fallback) | 4 hours | Shorter, so a transient NSE outage doesn't pin us to stale-static data |
+| Search suggestions | 6 hours | The catalog only changes on a listing/rename; caching keeps the Yahoo/LLM layers off the hot path |
 
 Live price/news are deliberately **not** cached — staleness tolerance there is
 a product decision, not a bug fix.
@@ -175,6 +217,7 @@ backend/app/
   api/routes/
     health.py             GET /health
     research.py           POST/GET jobs; single + compare execution paths
+    search.py             GET /search — ranked, scored typeahead candidates
   agents/
     state.py              AgentState TypedDict + reducers
     graph.py              StateGraph: 5-way parallel fan-out → join → calc → synth → critic
@@ -185,12 +228,19 @@ backend/app/
     compare.py            Two-brief join: metrics table + narrative
     runner.py             Sync stream wrapper; run_research_pipeline / run_compare_pipeline
   tools/                  Pure I/O + calc (no graph logic)
-  services/               Redis, cache, LLM factory, ticker resolve, intent, job store
+  services/               Redis, cache, LLM factory, ticker resolve, intent, job store,
+                          stock_search (catalog + Yahoo + LLM search layers)
   core/                   config, logging, ticker helpers, confidence,
                           compliance_filter, dedup, text_quality
   data/peer_groups.json   Curated NSE peer groups + sector→index map
+  data/nse_universe.json  GENERATED search catalog (~2.4k NSE symbols + tier)
+  data/stock_aliases.json Curated aliases + brand keywords (hand-maintained)
+  scripts/build_stock_universe.py  Rebuilds nse_universe.json from NSE archives
 frontend/src/
-  components/             ResearchStudio, BriefView, CompareView, ValuationPanel,
+  index.css               Theme tokens (dark = :root, light = [data-theme])
+  lib/theme.ts            Theme read/apply + localStorage persistence
+  components/             ResearchStudio, StockSearchInput, ThemeToggle, BrandMark,
+                          BriefView, CompareView, ValuationPanel,
                           PeerTable, ShareholdingCard, ConfidenceBadge, TrendIndicator,
                           DataGapBanner, Skeleton, BriefSkeleton, ErrorBoundary, PipelineStatus
   lib/api.ts              Typed fetch client

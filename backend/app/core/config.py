@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     news_max_articles: int = 5
     brief_cache_ttl_seconds: int = 3600
 
+    # --- advanced search (services/stock_search.py) ---
+    # Typeahead results are cached per query; the NSE catalog behind them only
+    # changes on a listing/rename, so a long TTL is safe and keeps the
+    # Yahoo/LLM layers off the hot path for repeat queries.
+    search_cache_ttl_seconds: int = 21600
+    # LLM interpretation of descriptive queries ("who makes maggi"). Off => the
+    # search box still works, it just can't answer questions that never name a
+    # company. Set false when running without an LLM key.
+    search_llm_fallback: bool = True
+    search_llm_timeout_seconds: float = 8.0
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

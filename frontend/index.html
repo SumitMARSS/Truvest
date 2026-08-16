@@ -1,18 +1,57 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SourceBrief — Agentic Equity Research</title>
-    <!-- Inline data-URI so there's no extra asset request (and no 404) -->
+    <meta name="color-scheme" content="dark light" />
+    <title>Truvest — Agentic Equity Research</title>
+    <meta
+      name="description"
+      content="Truvest runs planner → worker → critic agents over NSE/BSE data to produce sourced, confidence-tagged equity research briefs."
+    />
+    <!--
+      Pre-paint background, keyed to the same attribute the stylesheet uses.
+      This is a <style> rule rather than a scripted inline style on purpose:
+      an inline style would win over ANY stylesheet, so a stale/older CSS
+      bundle produced a dark page wearing light components — unreadable text
+      on the hero. As a plain rule it is simply overridden by whatever
+      stylesheet actually loads, so the worst case is an out-of-date look
+      rather than an unreadable page.
+    -->
+    <style>
+      :root {
+        background-color: #090d15;
+      }
+      :root[data-theme="light"] {
+        background-color: #f5f7fa;
+      }
+    </style>
+    <!--
+      Theme bootstrap. Runs before any paint, so the stored theme is applied
+      with no flash of the wrong palette. Dark is the default on a first visit;
+      the html element already carries data-theme="dark" above so even a
+      blocked/failed script lands on dark rather than an unstyled page.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("truvest-theme");
+          document.documentElement.dataset.theme = stored === "light" ? "light" : "dark";
+        } catch (e) {
+          /* storage blocked — the static dark default stands */
+        }
+      })();
+    </script>
+    <!-- Inline data-URI so there's no extra asset request (and no 404).
+         Truvest mark: rising bars inside a rounded square. -->
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f6e56'/%3E%3Cpath d='M7 21.5l5.5-6 4.5 4 8-9.5' fill='none' stroke='%23f3efe6' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23101a2b'/%3E%3Cg fill='%232dbea8'%3E%3Crect x='7' y='18' width='4' height='7' rx='1.2'/%3E%3Crect x='14' y='13' width='4' height='12' rx='1.2'/%3E%3Crect x='21' y='7' width='4' height='18' rx='1.2'/%3E%3C/g%3E%3C/svg%3E"
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Source+Sans+3:wght@400;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;700&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
   </head>

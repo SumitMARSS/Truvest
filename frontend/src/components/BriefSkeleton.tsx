@@ -6,7 +6,7 @@ import { SkeletonBlock, SkeletonCard } from "@/components/Skeleton";
  * the transition from skeleton -> real content doesn't jump around. */
 export function BriefSkeleton() {
   return (
-    <div className="animate-pulse space-y-8 rounded-2xl border border-line bg-white/60 p-6 shadow-sm md:p-8">
+    <div className="animate-pulse space-y-8 rounded-xl border border-line bg-surface p-6 shadow-card md:p-8">
       <div className="flex items-end justify-between gap-4 border-b border-line pb-6">
         <div className="space-y-2">
           <SkeletonBlock className="h-8 w-48" />

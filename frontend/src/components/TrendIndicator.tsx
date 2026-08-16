@@ -16,11 +16,11 @@ export function TrendIndicator({
   decimals?: number;
   size?: string;
 }) {
-  if (value == null) return <span className="text-ink/40">—</span>;
+  if (value == null) return <span className="text-muted">—</span>;
   const flat = Math.abs(value) < 0.005;
   const up = value > 0;
   const Icon = flat ? Minus : up ? ArrowUpRight : ArrowDownRight;
-  const tone = flat ? "text-ink/50" : up ? "text-accent" : "text-danger";
+  const tone = flat ? "text-muted" : up ? "text-accent" : "text-danger";
   const sign = value > 0 ? "+" : "";
   return (
     <span className={`inline-flex items-center gap-0.5 font-semibold ${tone} ${size}`}>

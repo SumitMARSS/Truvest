@@ -2,17 +2,115 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Design tokens — the single source of colour for the whole product.
+ *
+ * Values are bare `R G B` triples (not `rgb(...)`) so Tailwind can compose them
+ * with an alpha channel: `text-ink/60` becomes `rgb(var(--text-primary) / 0.6)`.
+ * That is what lets every existing `/40`, `/60`, `/70` utility in the codebase
+ * keep working across both themes without a single hardcoded colour.
+ *
+ * Dark is the default: `:root` IS the dark theme, and light is the opt-in
+ * override. A missing/late-loading theme attribute therefore falls back to
+ * dark rather than flashing a white page.
+ */
 :root {
-  --font-display: "Fraunces", Georgia, serif;
-  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Inter Tight", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* Dark — deep navy/charcoal, never pure black */
+  --bg-primary: 9 13 21; /* page */
+  --bg-surface: 15 20 30; /* cards */
+  --bg-elevated: 22 29 41; /* inner fills, dropdown rows, hover */
+  --border-primary: 33 43 58;
+  --text-primary: 226 233 243;
+  --text-secondary: 183 194 210;
+  --text-muted: 142 156 176; /* AA for small text on surface + elevated */
+  --accent: 45 190 168; /* restrained teal */
+  --success: 62 196 138;
+  --warn: 224 160 62;
+  --danger: 235 108 100;
+  --primary: 45 190 168; /* primary action surface */
+  --on-primary: 6 18 18; /* text on that surface */
+  --page-glow: 15 26 40; /* top-of-page wash */
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  /* Light — designed on its own terms, not an inversion */
+  --bg-primary: 245 247 250;
+  --bg-surface: 255 255 255;
+  --bg-elevated: 243 246 250;
+  --border-primary: 226 231 238;
+  --text-primary: 16 26 43;
+  --text-secondary: 70 83 106;
+  --text-muted: 93 106 125; /* AA for small text on surface + elevated */
+  --accent: 15 111 99;
+  --success: 15 122 87;
+  --warn: 133 71 5; /* darkened: AA on the warn-tinted badge/banner fills */
+  --danger: 180 35 24;
+  --primary: 16 26 43;
+  --on-primary: 255 255 255;
+  --page-glow: 232 238 245;
+  color-scheme: light;
 }
 
 body {
   @apply bg-paper text-ink antialiased font-sans;
-  background-image:
-    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(15, 110, 86, 0.12), transparent),
-    radial-gradient(ellipse 60% 40% at 100% 0%, rgba(180, 83, 9, 0.08), transparent),
-    linear-gradient(180deg, #f7f3eb 0%, #ebe4d6 100%);
+  /* One quiet wash at the top of the page — a document, not a landing page. */
+  background-image: linear-gradient(180deg, rgb(var(--page-glow)) 0%, rgb(var(--bg-primary)) 380px);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   min-height: 100vh;
   margin: 0;
+  /* Financial figures line up column-wise wherever they appear. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Theme switch: colours cross-fade, nothing moves. Scoped to the properties
+   that actually change so hover/focus transitions stay snappy. */
+.theme-transition,
+.theme-transition * {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    fill 180ms ease;
+}
+
+::selection {
+  background: rgb(var(--accent) / 0.22);
+}
+
+/* Visible, consistent keyboard focus everywhere (mouse clicks stay clean). */
+:focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.75);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Dropdown / table scrollbars styled to the theme instead of the OS default. */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--text-primary) / 0.25) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--text-primary) / 0.2);
+  border-radius: 999px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  .theme-transition * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

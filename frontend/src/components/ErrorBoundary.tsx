@@ -26,7 +26,7 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       return (
-        <div className="rounded-2xl border border-danger/30 bg-danger/5 p-6 text-danger">
+        <div className="rounded-xl border border-danger/30 bg-danger/5 p-6 text-danger">
           <p className="font-semibold">Something went wrong rendering this brief.</p>
           <p className="mt-2 text-sm text-danger/80">
             The underlying data was fetched successfully — this is a display bug, not a data
