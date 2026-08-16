@@ -4,7 +4,11 @@
  * live system working, not a stalled page.
  */
 export function SkeletonBlock({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-lg bg-ink/8 ${className}`} />;
+  // Bracket notation is load-bearing: Tailwind only emits bare slash opacities
+  // that exist in its own scale, and 8 is not one of them. The previous value
+  // compiled to no rule at all, so every skeleton rendered as blank space in
+  // both themes — a loading state that showed nothing was loading.
+  return <div className={`animate-pulse rounded-lg bg-ink/[0.08] ${className}`} />;
 }
 
 export function SkeletonCard({ title, lines = 3 }: { title: string; lines?: number }) {

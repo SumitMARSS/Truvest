@@ -127,7 +127,7 @@ function PerformancePanel({ brief }: { brief: ResearchBrief }) {
                   ? "bg-primary text-onprimary"
                   : available
                     ? "border border-line bg-surface text-ink/70 hover:border-accent/40 hover:text-accent"
-                    : "cursor-not-allowed border border-line/60 bg-elevated text-ink/25"
+                    : "cursor-not-allowed border border-line/60 bg-elevated text-ink/50"
               }`}
             >
               {p.key}

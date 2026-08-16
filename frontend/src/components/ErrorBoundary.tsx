@@ -28,14 +28,18 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="rounded-xl border border-danger/30 bg-danger/5 p-6 text-danger">
           <p className="font-semibold">Something went wrong rendering this brief.</p>
-          <p className="mt-2 text-sm text-danger/80">
+          <p className="mt-2 text-sm text-danger">
             The underlying data was fetched successfully — this is a display bug, not a data
             problem. Try running the search again.
           </p>
+          {/* text-paper, not text-white: `danger` is a light salmon in the dark
+              theme, where white-on-danger drops to ~3:1. The paper token is
+              dark on dark and near-white on light, so the label stays legible
+              on the filled button in both themes. */}
           <button
             type="button"
             onClick={() => this.setState({ error: null })}
-            className="mt-4 rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-danger/90"
+            className="mt-4 rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-paper hover:opacity-90"
           >
             Try rendering again
           </button>

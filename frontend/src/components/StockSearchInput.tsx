@@ -26,10 +26,13 @@ import { searchStocks, type StockSuggestion } from "@/lib/api";
 
 const DEBOUNCE_MS = 220;
 
+// Opacities are in bracket notation: Tailwind only emits bare slash values
+// from its own scale, and 12 and 8 are not in it. The previous values compiled
+// to no rule, so these pills rendered as bare text with no fill behind them.
 const CONFIDENCE_STYLES: Record<string, { pill: string; bar: string; label: string }> = {
-  high: { pill: "bg-accent/12 text-accent", bar: "bg-accent", label: "High" },
-  medium: { pill: "bg-warn/12 text-warn", bar: "bg-warn", label: "Medium" },
-  low: { pill: "bg-ink/8 text-secondary", bar: "bg-ink/30", label: "Low" },
+  high: { pill: "bg-accent/[0.12] text-accent", bar: "bg-accent", label: "High" },
+  medium: { pill: "bg-warn/[0.12] text-warn", bar: "bg-warn", label: "Medium" },
+  low: { pill: "bg-ink/[0.08] text-secondary", bar: "bg-ink/30", label: "Low" },
 };
 
 const LAYER_LABELS: Record<string, string> = {
@@ -316,7 +319,7 @@ export function StockSearchInput({
                           {s.exchange}
                         </span>
                         {s.sources.includes("llm") && (
-                          <span className="shrink-0 rounded bg-accent/12 px-1 py-px text-[9px] font-semibold uppercase tracking-[0.1em] text-accent">
+                          <span className="shrink-0 rounded bg-accent/[0.12] px-1 py-px text-[9px] font-semibold uppercase tracking-[0.1em] text-accent">
                             AI
                           </span>
                         )}
