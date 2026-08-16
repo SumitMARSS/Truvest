@@ -1,9 +1,17 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Loader2, Search, GitCompareArrows, Lightbulb } from "lucide-react";
-import { getResearch, startResearch, type ResearchJob, type StockSuggestion } from "@/lib/api";
+import {
+  getResearch,
+  listModels,
+  startResearch,
+  type ModelCatalog,
+  type ResearchJob,
+  type StockSuggestion,
+} from "@/lib/api";
 import { BriefView } from "@/components/BriefView";
 import { CompareView } from "@/components/CompareView";
 import { BriefSkeleton } from "@/components/BriefSkeleton";
+import { ModelPicker } from "@/components/ModelPicker";
 import { PipelineStatus } from "@/components/PipelineStatus";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StockSearchInput } from "@/components/StockSearchInput";
@@ -39,6 +47,29 @@ const ERROR_MESSAGES: Record<string, string> = {
 const ACTION_BUTTON =
   "inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-onprimary transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
 
+// The model choice survives reloads — it's a working preference, and re-picking
+// it on every visit would be tedious. null (absent) means "server default", so
+// the app keeps following the default if the server's changes.
+const MODEL_STORAGE_KEY = "truvest:model";
+
+function readStoredModel(): string | null {
+  try {
+    return localStorage.getItem(MODEL_STORAGE_KEY);
+  } catch {
+    // Private mode / blocked storage — a preference is not worth an exception.
+    return null;
+  }
+}
+
+function storeModel(modelId: string | null) {
+  try {
+    if (modelId) localStorage.setItem(MODEL_STORAGE_KEY, modelId);
+    else localStorage.removeItem(MODEL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function ResearchStudio() {
   const [mode, setMode] = useState<"single" | "compare">("single");
   const [query, setQuery] = useState("RELIANCE");
@@ -54,6 +85,32 @@ export function ResearchStudio() {
   const [job, setJob] = useState<ResearchJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // null = run on whatever the server says its default is.
+  const [model, setModel] = useState<string | null>(() => readStoredModel());
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    listModels().then((next) => {
+      if (cancelled || !next) return;
+      setCatalog(next);
+      // A stored pick can outlive the model itself — free models get retired.
+      // Drop it rather than sending an id the backend will reject with a 400.
+      setModel((current) => {
+        if (!current || next.models.some((m) => m.id === current)) return current;
+        storeModel(null);
+        return null;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function chooseModel(next: string | null) {
+    setModel(next);
+    storeModel(next);
+  }
 
   async function run(q: string) {
     setError(null);
@@ -61,7 +118,7 @@ export function ResearchStudio() {
     setJob(null);
     setComparePair(null);
     try {
-      const started = await startResearch(q.trim());
+      const started = await startResearch(q.trim(), model);
       setJob(started);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
@@ -163,9 +220,17 @@ export function ResearchStudio() {
               Compare two
             </button>
           </div>
-          <span className="hidden text-xs text-muted sm:inline">
-            Ticker · company · brand · sector · plain English
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="hidden text-xs text-muted xl:inline">
+              Ticker · company · brand · sector · plain English
+            </span>
+            <ModelPicker
+              catalog={catalog}
+              value={model}
+              onChange={chooseModel}
+              disabled={running}
+            />
+          </div>
         </div>
 
         {/* Stable keys per mode: without them React reconciles the single and

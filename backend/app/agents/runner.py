@@ -9,6 +9,7 @@ from typing import Callable, Optional
 from app.agents.compare import build_comparison
 from app.agents.graph import get_graph
 from app.models.schemas import CompareBrief, ResearchBrief
+from app.services.llm import set_model_override
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,15 @@ def run_research_pipeline(
     query: str,
     job_id: str,
     progress_cb: Optional[ProgressCallback] = None,
+    model: Optional[str] = None,
 ) -> ResearchBrief:
+    # Set here rather than at the API layer on purpose: this function is the
+    # entrypoint of the worker thread that owns the run, and a ContextVar set
+    # inside a thread stays confined to it. That is what keeps two concurrent
+    # jobs (or the two sides of a compare) on their own models. Already
+    # validated against the allowlist by api/routes/research.py.
+    set_model_override(model)
+
     graph = get_graph()
     initial = {
         "query": query,
@@ -55,6 +64,7 @@ def run_compare_pipeline(
     query_b: str,
     job_id: str,
     progress_cb: Optional[ProgressCallback] = None,
+    model: Optional[str] = None,
 ) -> CompareBrief:
     """
     Compare mode (spec 2.7) — runs the SAME single-ticker pipeline twice,
@@ -67,12 +77,16 @@ def run_compare_pipeline(
     a single-ticker failure.
     """
 
+    # The comparison narrative at the end is written in THIS thread, so it needs
+    # the override too — each side sets its own inside its own thread.
+    set_model_override(model)
+
     def _run_side(label: str, query: str) -> ResearchBrief:
         def _cb(message: str) -> None:
             if progress_cb:
                 progress_cb(f"{label}:{message}")
 
-        return run_research_pipeline(query, job_id=f"{job_id}-{label}", progress_cb=_cb)
+        return run_research_pipeline(query, job_id=f"{job_id}-{label}", progress_cb=_cb, model=model)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         future_a = pool.submit(_run_side, "a", query_a)

@@ -22,11 +22,14 @@ const COVERAGE = [
 ];
 
 export default function App() {
-  const [modelLabel, setModelLabel] = useState<string | null>(null);
+  // Provider, not model: the model is now the user's per-run choice and lives
+  // in the picker inside the form. A second model label up here would go stale
+  // the moment they change it and read as a contradiction.
+  const [provider, setProvider] = useState<string | null>(null);
 
   useEffect(() => {
     getHealth().then((h) => {
-      if (h?.llm_model) setModelLabel(h.llm_model.replace(/:free$/, ""));
+      if (h?.llm_provider) setProvider(h.llm_provider);
     });
   }, []);
 
@@ -46,9 +49,12 @@ export default function App() {
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
               NSE / BSE
             </span>
-            {modelLabel && (
-              <span className="hidden rounded border border-line bg-surface px-2 py-1 font-medium text-muted lg:inline">
-                {modelLabel}
+            {provider && (
+              <span
+                className="hidden rounded border border-line bg-surface px-2 py-1 font-medium text-muted lg:inline"
+                title="LLM provider this server is configured against"
+              >
+                {provider}
               </span>
             )}
             <ThemeToggle />

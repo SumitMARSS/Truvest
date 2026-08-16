@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
@@ -11,6 +12,8 @@ from app.core.config import settings
 from app.models.schemas import JobStatus, ResearchJobResponse, ResearchRequest, StockSuggestion
 from app.services import job_store
 from app.services.intent import detect_compare_intent
+from app.services.llm import active_model_id
+from app.services.model_catalog import validate_model
 from app.services.ticker_resolve import TickerResolutionError
 from app.agents.runner import run_compare_pipeline, run_research_pipeline
 
@@ -23,6 +26,14 @@ async def start_research(body: ResearchRequest, background: BackgroundTasks):
     job_id = str(uuid.uuid4())
     query = body.query.strip()
 
+    # Vet the requested model up front. Rejecting here costs the caller one 400;
+    # letting a bad id through would surface as a failed job several minutes
+    # later, and — worse — an unvetted id is spendable on the server's key.
+    try:
+        model = await validate_model(body.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     # Compare mode (spec 2.7) — "RELIANCE vs TCS", "compare X and Y". Detected
     # up front so the job record's `mode` is correct from the very first poll.
     pair = detect_compare_intent(query)
@@ -34,13 +45,16 @@ async def start_research(body: ResearchRequest, background: BackgroundTasks):
         query=query,
         progress="queued",
         mode=mode,
+        # Resolve None to the configured default so the UI can always name the
+        # model that is running, not just the one that was explicitly asked for.
+        model=model or active_model_id(),
     )
     await job_store.save_job(job)
 
     if pair:
-        background.add_task(_execute_compare_job, job_id, pair[0], pair[1])
+        background.add_task(_execute_compare_job, job_id, pair[0], pair[1], model)
     else:
-        background.add_task(_execute_job, job_id, query)
+        background.add_task(_execute_job, job_id, query, model)
     return job
 
 
@@ -56,7 +70,7 @@ async def get_research(job_id: str):
 # UPDATE: add GET /research/{job_id}/brief.md for markdown export
 
 
-async def _execute_job(job_id: str, query: str) -> None:
+async def _execute_job(job_id: str, query: str, model: Optional[str] = None) -> None:
     await job_store.update_job(
         job_id,
         status=JobStatus.running,
@@ -82,7 +96,7 @@ async def _execute_job(job_id: str, query: str) -> None:
         # NOTE: the worker thread may keep running after timeout (Python threads
         # can't be force-killed); the job is still marked failed for the client.
         brief = await asyncio.wait_for(
-            asyncio.to_thread(run_research_pipeline, query, job_id, on_progress),
+            asyncio.to_thread(run_research_pipeline, query, job_id, on_progress, model),
             timeout=settings.pipeline_timeout_seconds,
         )
         await job_store.update_job(
@@ -101,8 +115,8 @@ async def _execute_job(job_id: str, query: str) -> None:
             error_code="timeout",
             error=(
                 f"Research timed out after {settings.pipeline_timeout_seconds}s. "
-                "The local LLM may be too slow — try a smaller model "
-                "(e.g. LLM_MODEL=llama3:latest in .env) or raise PIPELINE_TIMEOUT_SECONDS."
+                "Free models are rate-limited and sometimes queue behind other traffic — "
+                "try a different model from the picker, or raise PIPELINE_TIMEOUT_SECONDS."
             ),
             updated_at=datetime.utcnow(),
         )
@@ -133,7 +147,9 @@ async def _execute_job(job_id: str, query: str) -> None:
         )
 
 
-async def _execute_compare_job(job_id: str, query_a: str, query_b: str) -> None:
+async def _execute_compare_job(
+    job_id: str, query_a: str, query_b: str, model: Optional[str] = None
+) -> None:
     await job_store.update_job(
         job_id,
         status=JobStatus.running,
@@ -151,7 +167,7 @@ async def _execute_compare_job(job_id: str, query_a: str, query_b: str) -> None:
 
     try:
         compare_brief = await asyncio.wait_for(
-            asyncio.to_thread(run_compare_pipeline, query_a, query_b, job_id, on_progress),
+            asyncio.to_thread(run_compare_pipeline, query_a, query_b, job_id, on_progress, model),
             # Both sides run concurrently in run_compare_pipeline, so the same
             # single-ticker budget applies — wall-clock is bounded by the
             # slower of the two, not their sum.

@@ -47,8 +47,42 @@ class ResearchRequest(BaseModel):
         max_length=120,
         description="NSE/BSE ticker or Indian company name (e.g. RELIANCE, TCS.NS)",
     )
+    # Which LLM writes this brief. Omit to use the server default. Validated
+    # against the free-model allowlist in services/model_catalog.py before the
+    # job starts — an arbitrary id here must never reach the provider, since
+    # the API key is the server's.
+    model: Optional[str] = Field(
+        None,
+        max_length=120,
+        description="LLM id from GET /api/v1/models (e.g. openai/gpt-oss-20b:free)",
+    )
     # India-only market mode — US tickers are not supported
     # UPDATE: add force_refresh, depth (quick|standard|deep)
+
+
+class LlmModelInfo(BaseModel):
+    """One selectable model in the picker."""
+
+    id: str = Field(..., description="Provider-qualified id passed back on /research")
+    name: str = Field(..., description="Display name, vendor prefix stripped")
+    vendor: str = "Other"
+    context_length: Optional[int] = None
+    description: str = ""
+    free: bool = True
+    # Reasoning models are slower and burn output budget on hidden thinking —
+    # worth flagging in the UI so a slow run isn't a surprise.
+    reasoning: bool = False
+
+
+class ModelCatalogResponse(BaseModel):
+    provider: str
+    default: str
+    # False for paid providers (openai/anthropic) — the UI renders read-only.
+    selectable: bool = True
+    # False when the list is the offline fallback rather than a live fetch.
+    live: bool = True
+    note: str = ""
+    models: list[LlmModelInfo] = Field(default_factory=list)
 
 
 class StockSuggestion(BaseModel):
@@ -281,6 +315,9 @@ class ResearchJobResponse(BaseModel):
     progress: Optional[str] = None
     # single | compare — tells the frontend which of brief/compare_brief to render
     mode: str = "single"
+    # The LLM that actually ran this job (resolved default, or the user's pick),
+    # so a finished brief can say which model wrote it.
+    model: Optional[str] = None
     brief: Optional[ResearchBrief] = None
     compare_brief: Optional[CompareBrief] = None
     error: Optional[str] = None

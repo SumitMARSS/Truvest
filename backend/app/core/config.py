@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     llm_model: str = "olmo-3:latest"  # used by the ollama provider only
     ollama_base_url: str = "http://localhost:11434"
     openrouter_api_key: str = ""
-    openrouter_model: str = "openai/gpt-oss-20b:free"
+    openrouter_model: str = "openai/gpt-oss-20b:free"  # default pick, user may override per run
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # Fewer articles = fewer tokens through the LLM
     news_max_articles: int = 5
     brief_cache_ttl_seconds: int = 3600
+    # How long the picker's model list is cached (services/model_catalog.py).
+    # OpenRouter's free roster changes on the order of days, so an hour is a
+    # good trade between freshness and keeping their /models call off the
+    # page-load path.
+    model_catalog_ttl_seconds: int = 3600
 
     # --- advanced search (services/stock_search.py) ---
     # Typeahead results are cached per query; the NSE catalog behind them only

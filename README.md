@@ -228,17 +228,38 @@ See `eval/tickers_testset.json` and `eval/run_eval.py`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/research` | Start job `{ "query": "RELIANCE" }` or `{ "query": "TCS vs INFY" }` |
+| `POST` | `/api/v1/research` | Start job `{ "query": "RELIANCE" }` or `{ "query": "TCS vs INFY" }`; optional `"model"` picks the LLM |
 | `GET` | `/api/v1/research/{job_id}` | Poll status + `brief` (single) or `compare_brief` (compare) |
 | `GET` | `/api/v1/search?q=&limit=` | Ranked stock suggestions with confidence — typeahead, never 404s on a miss |
-| `GET` | `/api/v1/health` | Health + `llm_provider` / `llm_model` |
+| `GET` | `/api/v1/models` | Selectable LLMs, default first (`?refresh=true` bypasses the cache) |
+| `GET` | `/api/v1/health` | Health + `llm_provider` / `llm_model` (the server default) |
 | `GET` | `/docs` | OpenAPI (Swagger) |
 
-Jobs carry `mode` (`single`\|`compare`) and, on failure, a machine-readable
-`error_code` (`ticker_not_found` \| `timeout` \| `internal_error`) so the UI can
-show a tailored message instead of one generic failure state. A
-`ticker_not_found` job also carries `suggestions` — the same ranked candidates
-the search endpoint returns — so a dead end is one click from a rerun.
+Jobs carry `mode` (`single`\|`compare`), the `model` that ran them, and, on
+failure, a machine-readable `error_code` (`ticker_not_found` \| `timeout` \|
+`internal_error`) so the UI can show a tailored message instead of one generic
+failure state. A `ticker_not_found` job also carries `suggestions` — the same
+ranked candidates the search endpoint returns — so a dead end is one click from
+a rerun.
+
+### Choosing the model
+
+The brief is written by whichever LLM the user picks in the header of the search
+card; `OPENROUTER_MODEL` is only the default. `GET /api/v1/models` fetches
+OpenRouter's live roster and keeps the **zero-priced** entries, so the list stays
+current as free models come and go instead of being pinned at deploy time.
+
+Two filters matter. Free-but-unusable models are dropped: zero-priced music
+models declare `text` among their outputs (`text+image->text+audio`), and
+guardrail/embedding endpoints are chat-shaped but can't write a summary — a
+naive price filter offers both. And because the OpenRouter key is the
+*server's*, `POST /research` refuses any model outside the free allowlist with a
+`400` rather than letting a request body spend it; OpenRouter's `:free` suffix
+guarantees zero cost, so an id newer than our cache is still accepted.
+
+On Ollama the picker lists locally installed models instead. On the paid
+providers (`openai`, `anthropic`) the catalog reports `selectable: false` and the
+UI renders a plain label — picking a model isn't the caller's decision there.
 
 ### Search: how a query becomes candidates
 

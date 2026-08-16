@@ -1,4 +1,4 @@
-import { Check, Loader2 } from "lucide-react";
+import { Check, Cpu, Loader2 } from "lucide-react";
 import type { ResearchJob } from "@/lib/api";
 
 const STEPS = [
@@ -28,9 +28,23 @@ export function PipelineStatus({ job }: { job: ResearchJob }) {
         <h2 className="font-display text-base font-semibold tracking-tight">
           {job.mode === "compare" ? "Agent pipeline (both stocks)" : "Agent pipeline"}
         </h2>
-        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
-          {job.status} · {job.progress || "—"}
-        </span>
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          {/* Which model produced this brief — the user can change it per run,
+              so the run has to say what it actually used, not what's selected
+              in the picker right now. */}
+          {job.model && (
+            <span
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-muted"
+              title={`This brief is being written by ${job.model}`}
+            >
+              <Cpu className="h-3 w-3 shrink-0" aria-hidden="true" />
+              {job.model.replace(/:free$/, "").split("/").pop()}
+            </span>
+          )}
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">
+            {job.status} · {job.progress || "—"}
+          </span>
+        </div>
       </div>
       {/* Flex-wrap, not an 11-column grid: fixed columns squeezed the longest
           labels ("Synthesize") until they overflowed their own chip. */}

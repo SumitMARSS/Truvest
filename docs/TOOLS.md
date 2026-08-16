@@ -17,7 +17,7 @@ want fully local inference.
 
 | Service | Env var | Notes |
 |---------|---------|-------|
-| OpenRouter | `OPENROUTER_API_KEY` | **Default LLM.** Free key at https://openrouter.ai/keys; any `:free` model works (`OPENROUTER_MODEL`, default `openai/gpt-oss-20b:free`) |
+| OpenRouter | `OPENROUTER_API_KEY` | **Default LLM.** Free key at https://openrouter.ai/keys. `OPENROUTER_MODEL` (default `openai/gpt-oss-20b:free`) sets the default only — the user picks per run from `GET /api/v1/models`, which lists the live free roster. Note the free-request cap is per *account*, not per model |
 | Tavily | `TAVILY_API_KEY` | News supplement + India filings search — free tier |
 | Alpha Vantage (optional) | `ALPHA_VANTAGE_API_KEY` | Market-data fallback when yfinance has no price |
 | OpenAI (optional) | `OPENAI_API_KEY` | Set `LLM_PROVIDER=openai` |

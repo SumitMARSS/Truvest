@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.core.config import settings
+from app.services.llm import active_model_id
 from app.services.redis_client import get_redis
 
 router = APIRouter()
@@ -16,17 +17,12 @@ async def health():
         except Exception:
             redis_ok = False
 
-    provider = settings.llm_provider.lower()
-    active_model = {
-        "openrouter": settings.openrouter_model,
-        "openai": settings.openai_model,
-        "anthropic": settings.anthropic_model,
-    }.get(provider, settings.llm_model)
-
     return {
         "status": "ok",
         "redis": redis_ok,
         "job_store": "redis" if redis_ok else "memory",
         "llm_provider": settings.llm_provider,
-        "llm_model": active_model,
+        # The server default. What a given job ran on is on the job record —
+        # the user can now pick a different model per run (GET /api/v1/models).
+        "llm_model": active_model_id(),
     }

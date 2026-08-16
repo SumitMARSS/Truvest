@@ -200,11 +200,38 @@ export interface StockSearchResult {
   compare_pair?: [string, string] | null;
 }
 
+/** One selectable LLM from GET /api/v1/models. */
+export interface LlmModel {
+  id: string;
+  /** Display name, vendor prefix and "(free)" suffix already stripped. */
+  name: string;
+  vendor: string;
+  context_length?: number | null;
+  description: string;
+  free: boolean;
+  /** Spends hidden thinking tokens — slower, worth flagging before a run. */
+  reasoning: boolean;
+}
+
+export interface ModelCatalog {
+  provider: string;
+  /** Server default — used when the user hasn't picked. */
+  default: string;
+  /** False on paid providers, where the model is fixed by server config. */
+  selectable: boolean;
+  /** False when the list is the offline fallback rather than a live fetch. */
+  live: boolean;
+  note: string;
+  models: LlmModel[];
+}
+
 export interface ResearchJob {
   job_id: string;
   status: JobStatus;
   query: string;
   mode: "single" | "compare";
+  /** The LLM this job actually ran on. */
+  model?: string | null;
   progress?: string | null;
   brief?: ResearchBrief | null;
   compare_brief?: CompareBrief | null;
@@ -216,16 +243,41 @@ export interface ResearchJob {
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-export async function startResearch(query: string): Promise<ResearchJob> {
+/**
+ * Start a research job. `model` is optional — omitting it runs the server
+ * default. The backend validates the id against its free-model allowlist and
+ * answers 400 with a readable reason if it isn't selectable, so surface that
+ * message rather than a bare status code.
+ */
+export async function startResearch(query: string, model?: string | null): Promise<ResearchJob> {
   const res = await fetch(`${API_URL}/api/v1/research`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify(model ? { query, model } : { query }),
   });
   if (!res.ok) {
-    throw new Error(`Failed to start research (${res.status})`);
+    const detail = await res
+      .json()
+      .then((body) => (typeof body?.detail === "string" ? body.detail : null))
+      .catch(() => null);
+    throw new Error(detail || `Failed to start research (${res.status})`);
   }
   return res.json();
+}
+
+/**
+ * The models the user may pick from. Returns null on failure — the picker then
+ * hides itself and every run uses the server default, which is exactly how the
+ * app behaved before model selection existed.
+ */
+export async function listModels(): Promise<ModelCatalog | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/v1/models`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
 }
 
 export async function getResearch(jobId: string): Promise<ResearchJob> {
