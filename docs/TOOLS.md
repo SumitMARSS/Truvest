@@ -18,12 +18,20 @@ want fully local inference.
 | Service | Env var | Notes |
 |---------|---------|-------|
 | OpenRouter | `OPENROUTER_API_KEY` | **Default LLM.** Free key at https://openrouter.ai/keys; any `:free` model works (`OPENROUTER_MODEL`, default `openai/gpt-oss-20b:free`) |
-| Tavily | `TAVILY_API_KEY` | News + India filings search — free tier |
+| Tavily | `TAVILY_API_KEY` | News supplement + India filings search — free tier |
 | Alpha Vantage (optional) | `ALPHA_VANTAGE_API_KEY` | Market-data fallback when yfinance has no price |
 | OpenAI (optional) | `OPENAI_API_KEY` | Set `LLM_PROVIDER=openai` |
 | Anthropic (optional) | `ANTHROPIC_API_KEY` | Set `LLM_PROVIDER=anthropic` |
 
 yfinance needs no key. SEC EDGAR is no longer used (India filings replaced it).
+
+**Keyless data sources (no signup at all):**
+
+| Source | Used for | Notes |
+|--------|----------|-------|
+| ET / Moneycontrol / Livemint / Business Standard RSS | Primary news feed | Business Standard 403s without a browser-shaped User-Agent — already handled in `tools/news_rss.py` |
+| NSE shareholding-pattern endpoint (via `nsepython`) | Promoter % + QoQ delta | Unofficial/undocumented — see the caveat in README |
+| NSE `allIndices` endpoint (via `nsepython`) | Sector-average P/E | Same caveat; falls back to a static table |
 
 ## Python libs (backend)
 

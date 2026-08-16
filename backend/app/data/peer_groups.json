@@ -1,0 +1,157 @@
+{
+  "_comment": "Static peer-group map for the ~45 most-searched NSE names, keyed by bare symbol (no .NS/.BO). Sourced from NSE sectoral index constituent lists (nseindia.com index pages), mapped manually to 3-5 closest peers per docs/AUDIT.md and spec 2.3 — NOT derived from yfinance sector/industry fields, which are frequently missing or wrong for Indian tickers. Refresh manually when sector composition materially changes; there is no live feed behind this file.",
+  "nse_sector_index": {
+    "_comment": "Maps our internal sector label to the NSE sectoral index whose live P/E is pulled for spec 2.1. Telecom has no standalone NSE sectoral index, so it intentionally has no entry here and falls back to the static table in sector_pe.py.",
+    "Energy & Conglomerate": "NIFTY ENERGY",
+    "IT Services": "NIFTY IT",
+    "Private Banks": "NIFTY PRIVATE BANK",
+    "Public Sector Banks": "NIFTY PSU BANK",
+    "FMCG": "NIFTY FMCG",
+    "Automobiles": "NIFTY AUTO",
+    "Pharmaceuticals": "NIFTY PHARMA",
+    "Metals & Mining": "NIFTY METAL",
+    "Financial Services (NBFC)": "NIFTY FINANCIAL SERVICES",
+    "Infrastructure & Capital Goods": "NIFTY INFRASTRUCTURE",
+    "Paints & Consumer Durables": "NIFTY CONSUMER DURABLES"
+  },
+  "sector_of": {
+    "RELIANCE": "Energy & Conglomerate",
+    "ONGC": "Energy & Conglomerate",
+    "NTPC": "Energy & Conglomerate",
+    "POWERGRID": "Energy & Conglomerate",
+    "BPCL": "Energy & Conglomerate",
+    "COALINDIA": "Energy & Conglomerate",
+
+    "TCS": "IT Services",
+    "INFY": "IT Services",
+    "WIPRO": "IT Services",
+    "HCLTECH": "IT Services",
+    "TECHM": "IT Services",
+    "LTIM": "IT Services",
+
+    "HDFCBANK": "Private Banks",
+    "ICICIBANK": "Private Banks",
+    "AXISBANK": "Private Banks",
+    "KOTAKBANK": "Private Banks",
+    "INDUSINDBK": "Private Banks",
+
+    "SBIN": "Public Sector Banks",
+    "BANKBARODA": "Public Sector Banks",
+    "PNB": "Public Sector Banks",
+    "CANBK": "Public Sector Banks",
+
+    "HINDUNILVR": "FMCG",
+    "ITC": "FMCG",
+    "NESTLEIND": "FMCG",
+    "BRITANNIA": "FMCG",
+    "DABUR": "FMCG",
+    "MARICO": "FMCG",
+
+    "TATAMOTORS": "Automobiles",
+    "MARUTI": "Automobiles",
+    "M&M": "Automobiles",
+    "BAJAJ-AUTO": "Automobiles",
+    "EICHERMOT": "Automobiles",
+    "HEROMOTOCO": "Automobiles",
+
+    "SUNPHARMA": "Pharmaceuticals",
+    "DRREDDY": "Pharmaceuticals",
+    "CIPLA": "Pharmaceuticals",
+    "DIVISLAB": "Pharmaceuticals",
+    "LUPIN": "Pharmaceuticals",
+
+    "TATASTEEL": "Metals & Mining",
+    "JSWSTEEL": "Metals & Mining",
+    "HINDALCO": "Metals & Mining",
+    "VEDL": "Metals & Mining",
+    "SAIL": "Metals & Mining",
+
+    "BAJFINANCE": "Financial Services (NBFC)",
+    "BAJAJFINSV": "Financial Services (NBFC)",
+    "SBILIFE": "Financial Services (NBFC)",
+    "HDFCLIFE": "Financial Services (NBFC)",
+    "SHRIRAMFIN": "Financial Services (NBFC)",
+
+    "BHARTIARTL": "Telecom",
+    "IDEA": "Telecom",
+
+    "LT": "Infrastructure & Capital Goods",
+    "ADANIPORTS": "Infrastructure & Capital Goods",
+    "ADANIENT": "Infrastructure & Capital Goods",
+    "SIEMENS": "Infrastructure & Capital Goods",
+
+    "ASIANPAINT": "Paints & Consumer Durables",
+    "BERGEPAINT": "Paints & Consumer Durables",
+    "TITAN": "Paints & Consumer Durables"
+  },
+  "peers": {
+    "RELIANCE": ["ONGC", "NTPC", "POWERGRID", "BPCL"],
+    "ONGC": ["RELIANCE", "COALINDIA", "NTPC", "BPCL"],
+    "NTPC": ["POWERGRID", "COALINDIA", "ONGC"],
+    "POWERGRID": ["NTPC", "COALINDIA", "ONGC"],
+    "BPCL": ["RELIANCE", "ONGC", "COALINDIA"],
+    "COALINDIA": ["ONGC", "NTPC", "POWERGRID"],
+
+    "TCS": ["INFY", "WIPRO", "HCLTECH", "TECHM"],
+    "INFY": ["TCS", "WIPRO", "HCLTECH", "TECHM"],
+    "WIPRO": ["TCS", "INFY", "HCLTECH", "TECHM"],
+    "HCLTECH": ["TCS", "INFY", "WIPRO", "TECHM"],
+    "TECHM": ["TCS", "INFY", "WIPRO", "HCLTECH"],
+    "LTIM": ["TCS", "INFY", "HCLTECH", "WIPRO"],
+
+    "HDFCBANK": ["ICICIBANK", "AXISBANK", "KOTAKBANK", "INDUSINDBK"],
+    "ICICIBANK": ["HDFCBANK", "AXISBANK", "KOTAKBANK", "INDUSINDBK"],
+    "AXISBANK": ["HDFCBANK", "ICICIBANK", "KOTAKBANK", "INDUSINDBK"],
+    "KOTAKBANK": ["HDFCBANK", "ICICIBANK", "AXISBANK", "INDUSINDBK"],
+    "INDUSINDBK": ["AXISBANK", "KOTAKBANK", "ICICIBANK"],
+
+    "SBIN": ["BANKBARODA", "PNB", "CANBK", "HDFCBANK"],
+    "BANKBARODA": ["SBIN", "PNB", "CANBK"],
+    "PNB": ["SBIN", "BANKBARODA", "CANBK"],
+    "CANBK": ["SBIN", "BANKBARODA", "PNB"],
+
+    "HINDUNILVR": ["ITC", "NESTLEIND", "BRITANNIA", "DABUR"],
+    "ITC": ["HINDUNILVR", "NESTLEIND", "BRITANNIA", "DABUR"],
+    "NESTLEIND": ["HINDUNILVR", "ITC", "BRITANNIA", "DABUR"],
+    "BRITANNIA": ["HINDUNILVR", "ITC", "NESTLEIND", "DABUR"],
+    "DABUR": ["HINDUNILVR", "ITC", "MARICO", "BRITANNIA"],
+    "MARICO": ["DABUR", "HINDUNILVR", "ITC"],
+
+    "TATAMOTORS": ["MARUTI", "M&M", "BAJAJ-AUTO", "EICHERMOT"],
+    "MARUTI": ["TATAMOTORS", "M&M", "HEROMOTOCO"],
+    "M&M": ["TATAMOTORS", "MARUTI", "BAJAJ-AUTO"],
+    "BAJAJ-AUTO": ["EICHERMOT", "HEROMOTOCO", "TATAMOTORS"],
+    "EICHERMOT": ["BAJAJ-AUTO", "HEROMOTOCO", "TATAMOTORS"],
+    "HEROMOTOCO": ["BAJAJ-AUTO", "EICHERMOT", "MARUTI"],
+
+    "SUNPHARMA": ["DRREDDY", "CIPLA", "DIVISLAB", "LUPIN"],
+    "DRREDDY": ["SUNPHARMA", "CIPLA", "DIVISLAB", "LUPIN"],
+    "CIPLA": ["SUNPHARMA", "DRREDDY", "DIVISLAB", "LUPIN"],
+    "DIVISLAB": ["SUNPHARMA", "DRREDDY", "CIPLA"],
+    "LUPIN": ["SUNPHARMA", "DRREDDY", "CIPLA"],
+
+    "TATASTEEL": ["JSWSTEEL", "HINDALCO", "VEDL", "SAIL"],
+    "JSWSTEEL": ["TATASTEEL", "HINDALCO", "SAIL"],
+    "HINDALCO": ["TATASTEEL", "JSWSTEEL", "VEDL"],
+    "VEDL": ["HINDALCO", "TATASTEEL", "SAIL"],
+    "SAIL": ["TATASTEEL", "JSWSTEEL", "VEDL"],
+
+    "BAJFINANCE": ["BAJAJFINSV", "SBILIFE", "HDFCLIFE", "SHRIRAMFIN"],
+    "BAJAJFINSV": ["BAJFINANCE", "SBILIFE", "HDFCLIFE"],
+    "SBILIFE": ["HDFCLIFE", "BAJAJFINSV", "BAJFINANCE"],
+    "HDFCLIFE": ["SBILIFE", "BAJAJFINSV", "BAJFINANCE"],
+    "SHRIRAMFIN": ["BAJFINANCE", "BAJAJFINSV"],
+
+    "BHARTIARTL": ["IDEA"],
+    "IDEA": ["BHARTIARTL"],
+
+    "LT": ["ADANIPORTS", "ADANIENT", "SIEMENS"],
+    "ADANIPORTS": ["LT", "ADANIENT"],
+    "ADANIENT": ["LT", "ADANIPORTS"],
+    "SIEMENS": ["LT", "ADANIENT"],
+
+    "ASIANPAINT": ["BERGEPAINT", "TITAN"],
+    "BERGEPAINT": ["ASIANPAINT", "TITAN"],
+    "TITAN": ["ASIANPAINT", "BERGEPAINT"]
+  }
+}

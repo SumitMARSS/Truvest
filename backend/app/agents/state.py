@@ -6,7 +6,7 @@ import operator
 from typing import Annotated, Any, Literal, Optional, TypedDict
 
 
-WorkerName = Literal["market", "news", "filings", "calc"]
+WorkerName = Literal["market", "news", "filings", "calc", "peers", "shareholding"]
 
 
 def _last_value(_old: str, new: str) -> str:
@@ -40,7 +40,9 @@ class AgentState(TypedDict, total=False):
     market_data: dict[str, Any]
     news_data: dict[str, Any]
     filings_data: dict[str, Any]
-    calc_data: dict[str, Any]
+    calc_data: dict[str, Any]  # includes the valuation P/E-band extension (spec 2.1)
+    peer_data: dict[str, Any]
+    shareholding_data: dict[str, Any]
 
     # Sources accumulated across workers
     sources: Annotated[list[dict[str, Any]], operator.add]

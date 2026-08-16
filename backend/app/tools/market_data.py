@@ -11,17 +11,33 @@ import pandas as pd
 import yfinance as yf
 
 from app.core.config import settings
+from app.core.ticker import bare_symbol, exchange_of, nse_quote_url
 
 logger = logging.getLogger(__name__)
+
+
+class MarketDataUnavailable(RuntimeError):
+    """Raised when yfinance has no usable data at all for a ticker (network
+    failure, rate-limit, or delisted symbol). Callers must catch this and
+    degrade the section honestly rather than let it crash the whole brief —
+    see docs/AUDIT.md #1.1."""
 
 
 def fetch_market_bundle(ticker: str) -> dict[str, Any]:
     """
     Pull NSE/BSE price history + fundamentals for Indian equities (*.NS / *.BO).
+    Raises MarketDataUnavailable (never a raw yfinance/network exception) if
+    nothing at all could be fetched — the caller (market_worker) is
+    responsible for turning that into a degraded-but-honest brief section.
     """
     t = yf.Ticker(ticker)
-    # 3y history so 6M / 1Y / 3Y performance windows can be computed
-    hist = t.history(period="3y")
+    try:
+        # 3y history so 6M / 1Y / 3Y performance windows can be computed
+        hist = t.history(period="3y")
+    except Exception as exc:
+        logger.warning("history() failed for %s: %s", ticker, exc)
+        hist = pd.DataFrame()
+
     info: dict = {}
     try:
         info = t.info or {}
@@ -51,11 +67,10 @@ def fetch_market_bundle(ticker: str) -> dict[str, Any]:
             return None
         return round((float(closes.iloc[-1]) - prev) / prev * 100, 4)
 
-    nse_symbol = ticker.replace(".NS", "").replace(".BO", "")
     bundle: dict[str, Any] = {
         "ticker": ticker,
         "market": "IN",
-        "exchange": "BSE" if ticker.upper().endswith(".BO") else "NSE",
+        "exchange": exchange_of(ticker),
         "retrieved_at": datetime.utcnow().isoformat(),
         "provider": "yfinance",
         "price": {
@@ -83,8 +98,9 @@ def fetch_market_bundle(ticker: str) -> dict[str, Any]:
         "close_prices": [float(x) for x in closes.tolist()] if len(closes) else [],
         "dates": [d.isoformat() for d in closes.index.to_pydatetime()] if len(closes) else [],
         "annual_revenue": _annual_revenue(t),
+        "quarterly_eps": _quarterly_eps(t),
         "url": f"https://finance.yahoo.com/quote/{ticker}",
-        "nse_url": f"https://www.nseindia.com/get-quotes/equity?symbol={nse_symbol}",
+        "nse_url": nse_quote_url(ticker),
     }
 
     # If yfinance returned no price, try Alpha Vantage (limited India coverage)
@@ -94,6 +110,16 @@ def fetch_market_bundle(ticker: str) -> dict[str, Any]:
             bundle["price"].update(av.get("price") or {})
             bundle["provider"] = "alpha_vantage"
             bundle["url"] = av.get("url") or bundle["url"]
+            last = av.get("price", {}).get("last_price")
+
+    if last is None and not bundle["fundamentals"].get("market_cap"):
+        # Nothing at all came back — yfinance down/rate-limited and no AV
+        # fallback. Fail loudly to the caller instead of returning a bundle
+        # that *looks* complete but is all-None (docs/AUDIT.md #1.1).
+        raise MarketDataUnavailable(
+            f"No price or fundamentals could be fetched for {ticker} "
+            "(yfinance unavailable, no Alpha Vantage fallback configured)."
+        )
 
     return bundle
 
@@ -111,6 +137,30 @@ def _annual_revenue(t: yf.Ticker) -> list[dict[str, Any]]:
         ]
     except Exception as exc:
         logger.debug("annual revenue unavailable: %s", exc)
+        return []
+
+
+def _quarterly_eps(t: yf.Ticker) -> list[dict[str, Any]]:
+    """Newest-first quarterly diluted EPS, for the P/E-band valuation calc
+    (spec 2.1). yfinance coverage on NSE tickers is inconsistent — expect
+    fewer than 8 quarters on many names; the null-guard for "partial
+    history" lives in tools/code_exec.py, not here (this just reports what
+    actually came back, no padding/guessing)."""
+    try:
+        stmt = t.quarterly_income_stmt
+        if stmt is None or stmt.empty:
+            return []
+        row_name = "Diluted EPS" if "Diluted EPS" in stmt.index else "Basic EPS"
+        if row_name not in stmt.index:
+            return []
+        row = stmt.loc[row_name]
+        return [
+            {"period": str(idx.date()), "eps": float(val)}
+            for idx, val in row.items()
+            if pd.notna(val)
+        ]
+    except Exception as exc:
+        logger.debug("quarterly EPS unavailable: %s", exc)
         return []
 
 

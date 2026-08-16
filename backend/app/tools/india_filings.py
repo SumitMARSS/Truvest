@@ -18,6 +18,7 @@ from typing import Any
 import yfinance as yf
 
 from app.core.config import settings
+from app.core.ticker import bare_symbol, nse_quote_url
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def _fmt_earnings_date(value: Any) -> str:
 
 
 def fetch_latest_filings(ticker: str, limit: int = 2) -> list[dict[str, Any]]:
-    bare = ticker.replace(".NS", "").replace(".BO", "")
+    bare = bare_symbol(ticker)
     company_bits: list[dict[str, Any]] = []
 
     # Earnings / calendar hints from Yahoo (often sparse for India)
@@ -120,7 +121,7 @@ def _tavily_india_filings(bare: str, ticker: str, limit: int = 2) -> list[dict[s
             {
                 "form": "RESULTS_STUB",
                 "filed_at": None,
-                "url": f"https://www.nseindia.com/get-quotes/equity?symbol={bare}",
+                "url": nse_quote_url(ticker),
                 "risk_factors": [
                     "Configure TAVILY_API_KEY to pull latest quarterly results / annual report text."
                 ],
@@ -154,10 +155,19 @@ def _tavily_india_filings(bare: str, ticker: str, limit: int = 2) -> list[dict[s
             ],
         )
         out: list[dict[str, Any]] = []
+        # Tavily frequently returns two different URLs whose scraped text is
+        # the same exchange disclosure — without this the brief renders the
+        # identical filing twice and derives duplicate risk flags from it
+        # (observed live for RELIANCE during the Phase 3 UI verification).
+        seen_snippets: set[str] = set()
         for item in result.get("results", [])[:limit]:
             snippets = _clean_snippets(item.get("content") or "", max_items=4)
             if not snippets:
                 continue
+            fingerprint = snippets[0][:120].lower()
+            if fingerprint in seen_snippets:
+                continue
+            seen_snippets.add(fingerprint)
             out.append(
                 {
                     "form": "INDIA_RESULTS",

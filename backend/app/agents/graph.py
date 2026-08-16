@@ -36,12 +36,22 @@ from app.agents.critic import critic_node
 from app.agents.planner import planner_node
 from app.agents.state import AgentState
 from app.agents.synthesizer import synthesizer_node
-from app.agents.workers import calc_worker, filings_worker, market_worker, news_worker
+from app.agents.workers import (
+    calc_worker,
+    filings_worker,
+    market_worker,
+    news_worker,
+    peers_worker,
+    shareholding_worker,
+)
 from app.services.ticker_resolve import resolve_ticker
 
 logger = logging.getLogger(__name__)
 
-_IO_WORKERS = ("market", "news", "filings")
+# Every worker here follows the same fan-out/join/retry pattern — no new
+# orchestration style introduced for the Phase 2 additions (peers,
+# shareholding): they're independent I/O calls just like market/news/filings.
+_IO_WORKERS = ("market", "news", "filings", "peers", "shareholding")
 
 
 def resolve_ticker_node(state: AgentState) -> dict[str, Any]:
@@ -91,6 +101,8 @@ def build_graph():
     g.add_node("market", market_worker)
     g.add_node("news", news_worker)
     g.add_node("filings", filings_worker)
+    g.add_node("peers", peers_worker)
+    g.add_node("shareholding", shareholding_worker)
     g.add_node("calc", calc_worker)
     g.add_node("join_workers", join_workers)
     g.add_node("synthesizer", synthesizer_node)
@@ -107,6 +119,8 @@ def build_graph():
             "market": "market",
             "news": "news",
             "filings": "filings",
+            "peers": "peers",
+            "shareholding": "shareholding",
             "join_workers": "join_workers",
         },
     )

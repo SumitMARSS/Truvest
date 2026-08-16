@@ -20,6 +20,8 @@ lxml>=5.3.0
 pandas>=2.2.3
 numpy>=2.1.0
 tavily-python>=0.5.0
+feedparser>=6.0.11        # India financial-press RSS feeds (spec 2.5)
+nsepython>=2.97           # unofficial NSE endpoints: shareholding pattern (2.2), sector P/E (2.1)
 
 # Infra
 redis>=5.2.0

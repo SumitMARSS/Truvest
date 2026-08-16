@@ -7,25 +7,32 @@ const STEPS = [
   { id: "market", label: "Market" },
   { id: "news", label: "News" },
   { id: "filings", label: "Filings" },
-  { id: "calc", label: "Calc" },
+  { id: "peers", label: "Peers" },
+  { id: "shareholding", label: "Holding" },
+  { id: "calc", label: "Valuation" },
   { id: "synthesizer", label: "Synthesize" },
   { id: "critic", label: "Critic" },
   { id: "finalize", label: "Finalize" },
 ];
 
 export function PipelineStatus({ job }: { job: ResearchJob }) {
-  const progress = (job.progress || "").toLowerCase();
+  // Compare-mode progress is prefixed "a:"/"b:" per side (agents/runner.py) —
+  // strip it for step-guessing; the label communicates it's a joint run.
+  const rawProgress = (job.progress || "").toLowerCase();
+  const progress = rawProgress.replace(/^[ab]:/, "");
   const activeIdx = guessStep(progress, job.status);
 
   return (
     <div className="rounded-2xl border border-line bg-white/50 p-5 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-display text-xl font-semibold">Agent pipeline</h2>
+        <h2 className="font-display text-xl font-semibold">
+          {job.mode === "compare" ? "Agent pipeline (both stocks)" : "Agent pipeline"}
+        </h2>
         <span className="text-sm uppercase tracking-wide text-ink/60">
           {job.status} · {job.progress || "—"}
         </span>
       </div>
-      <ol className="grid gap-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9">
+      <ol className="grid gap-2 sm:grid-cols-3 md:grid-cols-6 lg:grid-cols-11">
         {STEPS.map((step, i) => {
           const done = i < activeIdx || job.status === "completed";
           const active = i === activeIdx && job.status === "running";
@@ -58,8 +65,9 @@ export function PipelineStatus({ job }: { job: ResearchJob }) {
 function guessStep(progress: string, status: string): number {
   if (status === "completed") return STEPS.length;
   if (status === "pending") return 0;
-  // market/news/filings run in PARALLEL — any *_done message means the worker
-  // phase is underway; workers_joined means all I/O workers finished
+  // market/news/filings/peers/shareholding run in PARALLEL — any *_done
+  // message means that worker phase is underway; workers_joined means all
+  // I/O workers finished.
   const map: Record<string, number> = {
     queued: 0,
     starting_agents: 1,
@@ -67,16 +75,19 @@ function guessStep(progress: string, status: string): number {
     planner_retry: 1,
     resolved: 0,
     market_done: 2,
+    market_unavailable: 2,
     news_done: 3,
     filings_done: 4,
-    workers_joined: 5,
-    calc_done: 5,
-    calc_skipped: 5,
-    synthesized: 6,
-    critic_pass: 7,
-    critic_fail: 7,
-    finalized: 8,
-    done: 8,
+    peers_done: 5,
+    shareholding_done: 6,
+    workers_joined: 7,
+    calc_done: 7,
+    calc_skipped: 7,
+    synthesized: 8,
+    critic_pass: 9,
+    critic_fail: 9,
+    finalized: 10,
+    done: 10,
   };
   for (const [k, v] of Object.entries(map)) {
     if (progress.includes(k)) return v;

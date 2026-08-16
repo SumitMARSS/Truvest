@@ -151,10 +151,18 @@ def resolve_ticker(query: str) -> dict[str, Optional[str]]:
     if cleaned in _ALIASES:
         candidates.append(_ALIASES[cleaned])
 
+    # _clean_query splits on dots, so an explicitly-suffixed symbol arrives
+    # here as "TCS NS" rather than "TCS.NS". Re-join it BEFORE the
+    # single-word test below — this check used to live inside that block,
+    # where a string containing a space was unreachable by construction, so
+    # every "*.NS"/"*.BO" query fell through to the company-name search path
+    # and failed to resolve at all (docs/AUDIT.md #9.1).
+    if cleaned.endswith((" NS", " BO")):
+        head, _, suffix = cleaned.rpartition(" ")
+        cleaned = f"{head}.{suffix}"
+
     # 2. Single word → likely a bare NSE symbol
     if " " not in cleaned:
-        if cleaned.endswith((" NS", " BO")):
-            cleaned = cleaned.replace(" ", ".")
         base = cleaned.replace(" ", "")
         if base.endswith((".NS", ".BO")):
             candidates.append(base)

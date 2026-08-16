@@ -18,6 +18,16 @@ class SentimentLabel(str, Enum):
     bullish = "bullish"
     bearish = "bearish"
     neutral = "neutral"
+    # Fewer than 2 independent corroborating sources — the schema forbids a
+    # directional label in that case rather than let one headline read as
+    # a confident call (docs spec 2.5 / core/confidence.py).
+    insufficient_data = "insufficient_data"
+
+
+class ConfidenceLevel(str, Enum):
+    high = "high"
+    medium = "medium"
+    low = "low"
 
 
 class SourceRef(BaseModel):
@@ -54,6 +64,8 @@ class PriceAction(BaseModel):
     volume: Optional[float] = None
     avg_volume: Optional[float] = None
     source_ids: list[str] = Field(default_factory=list)
+    confidence: Optional[ConfidenceLevel] = None
+    confidence_reason: Optional[str] = None
 
 
 class Fundamentals(BaseModel):
@@ -64,6 +76,8 @@ class Fundamentals(BaseModel):
     profit_margin: Optional[float] = None
     # UPDATE: add debt/equity, free cash flow, sector/industry
     source_ids: list[str] = Field(default_factory=list)
+    confidence: Optional[ConfidenceLevel] = None
+    confidence_reason: Optional[str] = None
 
 
 class NewsItem(BaseModel):
@@ -75,6 +89,10 @@ class NewsItem(BaseModel):
     # Expected impact and horizon, e.g. "Likely positive in the near term"
     impact: str = ""
     source_ids: list[str] = Field(default_factory=list)
+    # How many independent sources (RSS feeds + Tavily) report this story
+    corroboration_count: int = 1
+    confidence: Optional[ConfidenceLevel] = None
+    confidence_reason: Optional[str] = None
 
 
 class FilingHighlight(BaseModel):
@@ -85,6 +103,8 @@ class FilingHighlight(BaseModel):
     mda_highlights: list[str] = Field(default_factory=list)
     url: Optional[str] = None
     source_ids: list[str] = Field(default_factory=list)
+    confidence: Optional[ConfidenceLevel] = None
+    confidence_reason: Optional[str] = None
 
 
 class CalcMetrics(BaseModel):
@@ -95,6 +115,8 @@ class CalcMetrics(BaseModel):
     # UPDATE: add RSI, drawdown, volatility
     notes: list[str] = Field(default_factory=list)
     source_ids: list[str] = Field(default_factory=list)
+    confidence: Optional[ConfidenceLevel] = None
+    confidence_reason: Optional[str] = None
 
 
 class RiskFlag(BaseModel):
@@ -102,6 +124,8 @@ class RiskFlag(BaseModel):
     title: str
     detail: str
     source_ids: list[str] = Field(default_factory=list)
+    confidence: Optional[ConfidenceLevel] = None
+    confidence_reason: Optional[str] = None
 
 
 class PricePoint(BaseModel):
@@ -109,6 +133,76 @@ class PricePoint(BaseModel):
 
     date: str
     close: float
+
+
+class PeBandPoint(BaseModel):
+    date: str
+    pe: float
+
+
+class PeBand(BaseModel):
+    """Rolling TTM P/E band from historical price x EPS (spec 2.1)."""
+
+    available: bool = False
+    reason: Optional[str] = None
+    series: list[PeBandPoint] = Field(default_factory=list)
+    band_min: Optional[float] = None
+    band_max: Optional[float] = None
+    band_avg: Optional[float] = None
+    partial_history: bool = False
+    quarters_used: Optional[int] = None
+
+
+class SectorPe(BaseModel):
+    available: bool = False
+    reason: Optional[str] = None
+    sector: Optional[str] = None
+    index: Optional[str] = None
+    pe: Optional[float] = None
+    as_of: Optional[str] = None
+    source: Optional[str] = None  # nse_live | static_fallback
+
+
+class ValuationContext(BaseModel):
+    pe_band: PeBand = Field(default_factory=PeBand)
+    sector_pe: SectorPe = Field(default_factory=SectorPe)
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class PeerRow(BaseModel):
+    ticker: str
+    company_name: Optional[str] = None
+    last_price: Optional[float] = None
+    currency: Optional[str] = None
+    change_1y_pct: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    market_cap: Optional[float] = None
+    profit_margin: Optional[float] = None
+    yoy_revenue_growth: Optional[float] = None
+    is_subject: bool = False
+
+
+class PeerComparison(BaseModel):
+    """Spec 2.3 — reuses market+calc across a static, curated peer group."""
+
+    available: bool = False
+    reason: Optional[str] = None
+    sector: Optional[str] = None
+    rows: list[PeerRow] = Field(default_factory=list)
+
+
+class Shareholding(BaseModel):
+    """Spec 2.2 — promoter holding % + QoQ delta only in v1."""
+
+    available: bool = False
+    reason: Optional[str] = None
+    as_of: Optional[str] = None
+    promoter_pct: Optional[float] = None
+    promoter_qoq_delta: Optional[float] = None
+    prior_quarter_date: Optional[str] = None
+    public_pct: Optional[float] = None
+    provider: Optional[str] = None
+    quarters_available: Optional[int] = None
 
 
 class ResearchBrief(BaseModel):
@@ -122,12 +216,34 @@ class ResearchBrief(BaseModel):
     overall_news_sentiment: Optional[SentimentLabel] = None
     filings: list[FilingHighlight] = Field(default_factory=list)
     calculations: CalcMetrics = Field(default_factory=CalcMetrics)
+    valuation: ValuationContext = Field(default_factory=ValuationContext)
+    peer_comparison: PeerComparison = Field(default_factory=PeerComparison)
+    shareholding: Shareholding = Field(default_factory=Shareholding)
     analyst_summary: str = ""
     risks: list[RiskFlag] = Field(default_factory=list)
     sources: list[SourceRef] = Field(default_factory=list)
+    # Honest, user-visible record of any section that degraded gracefully
+    # instead of crashing the brief (e.g. "market data unavailable this run").
+    # Never fabricate data to fill a gap — always list it here instead.
+    data_gaps: list[str] = Field(default_factory=list)
     critic_passed: bool = False
     critic_notes: list[str] = Field(default_factory=list)
+    # Audit trail for the SEBI-safe language pass — every rewrite the
+    # deterministic compliance filter made, input phrase -> output phrase.
+    compliance_log: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CompareBrief(BaseModel):
+    """Spec 2.7 — joins two independently-produced ResearchBriefs. Each one
+    went through the FULL single-ticker pipeline (planner/workers/critic/
+    retry) on its own; this only adds a metrics table + narrative on top."""
+
+    tickers: list[str]
+    briefs: list[ResearchBrief]
+    metrics_table: list[dict[str, Any]] = Field(default_factory=list)
+    comparison_summary: str = ""
+    as_of: datetime = Field(default_factory=datetime.utcnow)
 
 
 class ResearchJobResponse(BaseModel):
@@ -135,7 +251,13 @@ class ResearchJobResponse(BaseModel):
     status: JobStatus
     query: str
     progress: Optional[str] = None
+    # single | compare — tells the frontend which of brief/compare_brief to render
+    mode: str = "single"
     brief: Optional[ResearchBrief] = None
+    compare_brief: Optional[CompareBrief] = None
     error: Optional[str] = None
+    # ticker_not_found | timeout | internal_error — lets the frontend show a
+    # tailored message instead of one generic failure state (docs/AUDIT.md #1.3)
+    error_code: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

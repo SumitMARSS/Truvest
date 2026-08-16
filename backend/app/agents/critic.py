@@ -12,6 +12,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.agents.state import AgentState, CriticIssue
+from app.core.compliance_filter import apply_compliance_filter
+from app.core.confidence import apply_confidence
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,15 @@ logger = logging.getLogger(__name__)
 
 def critic_node(state: AgentState) -> dict[str, Any]:
     draft = state.get("draft_brief") or {}
+
+    # Deterministic passes that run every time, independent of pass/fail —
+    # neither depends on external data, so there's no reason to gate them
+    # behind "only on final accept" (docs/AUDIT.md-adjacent: pure logic,
+    # cheap, and the compliance filter in particular must never be skipped
+    # even on a force-accepted brief with warnings).
+    draft = apply_confidence(draft)
+    draft, compliance_log = apply_compliance_filter(draft)
+
     issues: list[CriticIssue] = []
     notes: list[str] = []
 
@@ -45,12 +56,15 @@ def critic_node(state: AgentState) -> dict[str, Any]:
                 f"Max critic retries ({settings.max_critic_retries}) reached — "
                 "accepting brief with warnings."
             )
+    if compliance_log:
+        notes.append(f"{len(compliance_log)} phrase(s) rewritten for SEBI-safe language.")
 
     accept = truly_passed or force_accept
     brief = {
         **draft,
         "critic_passed": truly_passed,
         "critic_notes": notes,
+        "compliance_log": compliance_log,
         "metadata": {
             **(draft.get("metadata") or {}),
             "force_accepted": force_accept,
@@ -129,6 +143,19 @@ def _check_citations(draft: dict[str, Any]) -> list[CriticIssue]:
                     "message": f"News item {i} missing source_ids",
                     "failed_subtask": "news",
                     "claim": n.get("title") or str(i),
+                }
+            )
+
+    # Previously unchecked (docs/AUDIT.md #3.2) — filings entries could carry
+    # empty source_ids and nothing would ever catch or retry it.
+    for i, f in enumerate(draft.get("filings") or []):
+        if not f.get("source_ids"):
+            issues.append(
+                {
+                    "code": "FILING_UNCITED",
+                    "message": f"Filing item {i} ({f.get('form')}) missing source_ids",
+                    "failed_subtask": "filings",
+                    "claim": f.get("form") or str(i),
                 }
             )
     return issues

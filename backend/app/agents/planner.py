@@ -9,7 +9,7 @@ from app.agents.state import AgentState, WorkerName
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WORKERS: list[WorkerName] = ["market", "news", "filings", "calc"]
+DEFAULT_WORKERS: list[WorkerName] = ["market", "news", "filings", "peers", "shareholding", "calc"]
 
 
 def planner_node(state: AgentState) -> dict[str, Any]:
@@ -44,7 +44,9 @@ def planner_node(state: AgentState) -> dict[str, Any]:
         f"Fetch NSE/BSE price & fundamentals for {ticker}",
         f"Fetch India market news + sentiment for {ticker}",
         f"Fetch latest quarterly/annual results highlights for {ticker}",
-        f"Compute derived metrics (P/E check, SMAs, YoY) for {ticker}",
+        f"Fetch sector peer comparison for {ticker}",
+        f"Fetch shareholding pattern (promoter %) for {ticker}",
+        f"Compute derived metrics (P/E band, sector P/E, SMAs, YoY) for {ticker}",
         f"Synthesize INR research brief for {ticker}",
     ]
     # UPDATE: use LLM planner (get_chat_model) to dynamically add subtasks

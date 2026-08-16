@@ -9,18 +9,52 @@ from typing import Any
 
 from app.agents.state import AgentState
 from app.core.config import settings
+from app.core.dedup import cluster_articles
+from app.core.ticker import bare_symbol, nse_quote_url
 from app.services.llm import get_chat_model
-from app.tools.code_exec import run_calculations
-from app.tools.market_data import fetch_market_bundle
+from app.tools.code_exec import compute_pe_band, run_calculations
+from app.tools.market_data import MarketDataUnavailable, fetch_market_bundle
+from app.tools.news_rss import fetch_rss_news
 from app.tools.news_search import search_ticker_news
 from app.tools.india_filings import fetch_latest_filings  # India: replaces SEC EDGAR
+from app.tools.peer_data import fetch_peer_comparison, sector_of
+from app.tools.sector_pe import fetch_sector_pe
+from app.tools.shareholding import fetch_shareholding
+
+# Below this many independent corroborating sources, a directional sentiment
+# label is not allowed to survive — spec 2.5's hard rule. Enforced here in
+# code (not the LLM prompt) so it can't silently drift.
+_MIN_SOURCES_FOR_DIRECTIONAL_SENTIMENT = 2
 
 logger = logging.getLogger(__name__)
 
 
 def market_worker(state: AgentState) -> dict[str, Any]:
     ticker = state["ticker"]
-    bundle = fetch_market_bundle(ticker)
+    try:
+        bundle = fetch_market_bundle(ticker)
+    except MarketDataUnavailable as exc:
+        # Degrade honestly instead of crashing the whole job (docs/AUDIT.md
+        # #1.1) — the brief still gets news/filings/calc sections, and the
+        # UI shows "market data unavailable" rather than a blank failed job.
+        logger.warning("market data unavailable for %s: %s", ticker, exc)
+        return {
+            "market_data": {
+                "ticker": ticker,
+                "unavailable": True,
+                "unavailable_reason": str(exc),
+                "price": {},
+                "fundamentals": {},
+                "close_prices": [],
+                "dates": [],
+                "annual_revenue": [],
+                "nse_url": nse_quote_url(ticker),
+            },
+            "sources": [],
+            "completed_workers": ["market"],
+            "status_message": "market_unavailable",
+        }
+
     source = {
         "id": f"src-market-{ticker}",
         "title": f"NSE/BSE market data for {ticker}",
@@ -37,9 +71,27 @@ def market_worker(state: AgentState) -> dict[str, Any]:
 
 
 def news_worker(state: AgentState) -> dict[str, Any]:
+    """
+    RSS (Economic Times / Moneycontrol / Livemint / Business Standard) is
+    the primary news source (spec 2.5) — structured, free, higher signal
+    than generic web search. Tavily supplements it for freshness/coverage,
+    not the other way around. Every article is clustered against the rest
+    before sentiment is assigned, and a story with fewer than 2 independent
+    outlets is barred from a directional (bullish/bearish) label — it comes
+    back `insufficient_data` instead, never a confident-looking guess off
+    one headline.
+    """
     ticker = state["ticker"]
     company = state.get("company_name")
-    articles = search_ticker_news(ticker, company, max_results=settings.news_max_articles)
+    bare = bare_symbol(ticker)
+
+    rss_articles = fetch_rss_news(bare, company, max_results=settings.news_max_articles)
+    tavily_articles = search_ticker_news(ticker, company, max_results=settings.news_max_articles)
+
+    real_candidates = [a for a in (rss_articles + tavily_articles) if a.get("provider") != "stub"]
+    clustered = cluster_articles(real_candidates) if real_candidates else []
+    clustered.sort(key=lambda a: a.get("published_date") or "", reverse=True)
+    articles = clustered[: settings.news_max_articles] or tavily_articles  # keep stub if nothing real came back
 
     # ONE batched LLM call for all articles; deterministic keyword fallback if
     # the LLM is unreachable so the brief never says "sentiment unavailable"
@@ -58,9 +110,14 @@ def news_worker(state: AgentState) -> dict[str, Any]:
                 "provider": art.get("provider") or "tavily",
             }
         )
-        sentiment, rationale, impact = sentiments.get(
-            i, _heuristic_sentiment(art)
-        )
+        sentiment, rationale, impact = sentiments.get(i, _heuristic_sentiment(art))
+        corroboration = int(art.get("corroboration_count") or 1)
+        if sentiment in ("bullish", "bearish") and corroboration < _MIN_SOURCES_FOR_DIRECTIONAL_SENTIMENT:
+            sentiment = "insufficient_data"
+            rationale = (
+                f"Only {corroboration} independent source reported this — "
+                "a directional call needs at least 2 (spec 2.5 corroboration rule)."
+            )
         classified.append(
             {
                 "title": art.get("title"),
@@ -70,6 +127,7 @@ def news_worker(state: AgentState) -> dict[str, Any]:
                 "rationale": rationale,
                 "impact": impact,
                 "source_ids": [sid],
+                "corroboration_count": corroboration,
             }
         )
 
@@ -107,9 +165,42 @@ def filings_worker(state: AgentState) -> dict[str, Any]:
     }
 
 
+def peers_worker(state: AgentState) -> dict[str, Any]:
+    """Sector peer comparison (spec 2.3) — reuses fetch_market_bundle/run_calculations
+    across peers, so a bad peer degrades that one row, never the whole worker."""
+    ticker = state["ticker"]
+    try:
+        comparison = fetch_peer_comparison(ticker)
+    except Exception as exc:
+        logger.warning("peer comparison worker failed for %s: %s", ticker, exc)
+        comparison = {"available": False, "reason": f"Peer comparison failed: {exc}", "rows": []}
+    return {
+        "peer_data": comparison,
+        "completed_workers": ["peers"],
+        "status_message": "peers_done",
+    }
+
+
+def shareholding_worker(state: AgentState) -> dict[str, Any]:
+    """Promoter shareholding % + QoQ delta (spec 2.2). Wrapped defensively —
+    an NSE endpoint outage must render as an honest 'unavailable' section,
+    never retry-loop the whole brief or crash the job."""
+    ticker = state["ticker"]
+    try:
+        holding = fetch_shareholding(ticker)
+    except Exception as exc:
+        logger.warning("shareholding worker failed for %s: %s", ticker, exc)
+        holding = {"available": False, "reason": f"Shareholding lookup failed: {exc}"}
+    return {
+        "shareholding_data": holding,
+        "completed_workers": ["shareholding"],
+        "status_message": "shareholding_done",
+    }
+
+
 def calc_worker(state: AgentState) -> dict[str, Any]:
     market = state.get("market_data") or {}
-    if not market:
+    if not market or market.get("unavailable"):
         # Dependency: market must run first — planner should enforce on retry
         return {
             "calc_data": {"error": "market_data missing"},
@@ -118,6 +209,29 @@ def calc_worker(state: AgentState) -> dict[str, Any]:
         }
 
     calcs = run_calculations(market)
+
+    # Valuation context (spec 2.1): P/E band is pure math over data already
+    # fetched by market_worker; sector P/E is a small cached I/O call kept
+    # inside calc rather than spun into its own LLM-calling worker, per the
+    # "extend calc, don't add a new worker for pure computation" principle.
+    ticker = state["ticker"]
+    try:
+        pe_band = compute_pe_band(
+            market.get("dates") or [], market.get("close_prices") or [], market.get("quarterly_eps") or []
+        )
+    except Exception as exc:
+        logger.warning("pe band computation failed for %s: %s", ticker, exc)
+        pe_band = {"available": False, "reason": f"P/E band computation failed: {exc}"}
+
+    sector = sector_of(ticker)
+    try:
+        sector_pe = fetch_sector_pe(sector)
+    except Exception as exc:
+        logger.warning("sector P/E fetch failed for %s: %s", ticker, exc)
+        sector_pe = {"available": False, "reason": f"Sector P/E lookup failed: {exc}"}
+
+    calcs["valuation"] = {"pe_band": pe_band, "sector_pe": sector_pe}
+
     source = {
         "id": f"src-calc-{state['ticker']}",
         "title": f"Derived calculations for {state['ticker']}",
@@ -255,5 +369,5 @@ def _safe_json_list(text: str) -> list[dict[str, Any]]:
 def _majority_sentiment(labels: list[str]) -> str:
     if not labels:
         return "neutral"
-    counts = {k: labels.count(k) for k in ("bullish", "bearish", "neutral")}
+    counts = {k: labels.count(k) for k in ("bullish", "bearish", "neutral", "insufficient_data")}
     return max(counts, key=counts.get)

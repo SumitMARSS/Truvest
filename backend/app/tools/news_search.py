@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from app.core.config import settings
+from app.core.ticker import bare_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ def search_ticker_news(
     max_results: int = 8,
 ) -> list[dict[str, Any]]:
     """Search recent India equity news for the NSE/BSE ticker."""
-    bare = ticker.replace(".NS", "").replace(".BO", "")
+    bare = bare_symbol(ticker)
     name = company_name or bare
     query = (
         f"{name} {bare} NSE share price OR quarterly results OR earnings India"
