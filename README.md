@@ -79,16 +79,32 @@ Stock_Project/
 │   │   └── core/            # config, logging, ticker, confidence,
 │   │                        #   compliance_filter, dedup, text_quality
 │   ├── scripts/             # build_stock_universe.py (rebuilds the catalog)
-│   ├── tests/               # 113 tests
+│   ├── tests/               # 133 tests, no network, ~2s
 │   └── requirements.txt
-├── frontend/                # Truvest UI (React + Vite) + 27 vitest tests
-│                            #   tailwind.config.js holds the whole palette:
-│                            #   ink / paper / surface / accent / warn / danger / line
+├── frontend/                # Truvest UI (React + Vite) + 55 vitest tests
+│   ├── src/components/      # ResearchStudio · StockSearchInput · ModelPicker ·
+│   │                        #   PipelineStatus · BriefView · CompareView ·
+│   │                        #   ValuationPanel · PeerTable · ShareholdingCard ·
+│   │                        #   ConfidenceBadge · TrendIndicator · DataGapBanner ·
+│   │                        #   Skeleton · BriefSkeleton · ErrorBoundary ·
+│   │                        #   ThemeToggle · BrandMark
+│   ├── src/lib/             # api.ts (typed client) · theme.ts
+│   └── src/index.css        # theme tokens; tailwind.config.js maps them to
+│                            #   paper / surface / elevated / line / ink / secondary /
+│                            #   muted / accent / success / warn / danger / primary
 ├── eval/                    # Factual accuracy + graceful-degradation harness
-├── docs/                    # ARCHITECTURE.md, TOOLS.md, AUDIT.md
+├── docs/                    # ARCHITECTURE.md, TOOLS.md, AUDIT.md, INTERVIEW_QA.md
 ├── docker-compose.yml
 └── .env.example
 ```
+
+### Bundled data (no key, no network at runtime)
+
+| File | Contents |
+|---|---|
+| `nse_universe.json` | 2,378 NSE symbols with industry + Nifty-50/100/500 tier, generated from NSE archives |
+| `stock_aliases.json` | 161 hand-curated entries — short forms ("HUL", "RIL") and brand keywords ("maggi", "jaguar") |
+| `peer_groups.json` | 57 tickers → peer group + sector label, plus 12 sector → NSE-index mappings shared with the sector-P/E lookup |
 
 ## Tools you need to install
 
@@ -190,18 +206,53 @@ fan-out/join/retry pattern — no second orchestration style was introduced.
 
 **LLM calls (2 per job):** (1) batched news sentiment + near/far impact, (2) analyst summary. Failures fall back to heuristics / data-driven text — never raw API errors in the UI.
 
+## Execution model
+
+A brief takes tens of seconds to minutes, so nothing about it is synchronous.
+
+| Layer | Mechanism | Why |
+|---|---|---|
+| HTTP | `BackgroundTasks` + immediate `job_id` | No proxy holds a multi-minute request open |
+| Job wrapper | `asyncio.wait_for(asyncio.to_thread(...), 420s)` | `graph.stream()` is sync and blocking — running it inline would freeze the event loop |
+| Progress | `asyncio.run_coroutine_threadsafe` | The callback fires on the worker thread; job-store writes belong to the loop |
+| Graph | LangGraph superstep fan-out | 5 I/O workers in one superstep; wall-clock is the slowest, not the sum |
+| Inside workers | `ThreadPoolExecutor` — 4 RSS feeds, ≤5 peer rows, 2 compare sides | Blocking HTTP inside sync graph nodes |
+| Model choice | `ContextVar`, set **inside** the worker thread | A module global would let two concurrent jobs overwrite each other's model |
+| Frontend | 2s poll with an `inFlight` guard + 10-min ceiling | No stacked requests, no runaway loop |
+
+One caveat stated plainly: `asyncio.wait_for` cancels the *await*, not the
+thread. A timed-out job is marked failed for the client while its worker thread
+runs to completion and discards its result — Python threads can't be
+force-killed, and process isolation is the real fix.
+
 ## Tests
 
 ```bash
-make test                      # backend: 86 tests
-cd frontend && npm test        # frontend: 14 tests (vitest)
+make test                      # backend: 133 tests, ~2s, zero network
+cd frontend && npm test        # frontend: 55 tests across 8 files (vitest + jsdom)
 cd frontend && npm run lint    # tsc --noEmit
 ```
 
-Confidence scoring and the compliance filter are pure logic with no external
-dependency, so both are fully unit-tested (`test_confidence.py`,
-`test_compliance_filter.py`), as are the P/E band math, article clustering,
-corroboration downgrade rule, peer degradation, and ticker resolution.
+The architecture is what makes this fast: every load-bearing decision lives in a
+pure function, so nothing worth testing needs a network call.
+
+| Area | Tests | What it pins down |
+|---|---|---|
+| `test_stock_search.py` | 27 | Scoring calibration, trigram fuzzy, sector intent, alias/brand matching, layer merge |
+| `test_model_catalog.py` | 20 | Zero-price filter, text-only-output filter, allowlist validation, fallback roster |
+| `test_confidence.py` | 10 | The full High/Medium/Low rule table, idempotence, no-mutation |
+| `test_calc.py` | 9 | P/E, YoY, SMAs — the "no LLM does math" claim |
+| `test_intent.py` | 8 | Compare-intent regex + when the LLM fallback may fire |
+| `test_compliance_filter.py` / `test_text_quality.py` | 7 each | SEBI rewrites + audit log; the captured degenerate-output string |
+| `test_ticker_resolve.py` | 6 | Suffix cleaning, alias fast path, `.NS`/`.BO`, suggestions on failure |
+| `test_valuation.py` / `test_peer_data.py` / `test_sector_pe.py` / `test_critic_planner.py` | 5 each | P/E band partial history; peer degradation; sector fallback; targeted retry |
+| `test_dedup.py` / `test_shareholding.py` / `test_ticker_helpers.py` | 4 each | Outlet-level corroboration counting; QoQ delta; ticker helpers |
+| `test_news_rss.py` / `test_compare.py` | 3 / 2 | Per-feed independence; metrics table + fallback narrative |
+| `test_market_worker_degrades.py` / `test_news_worker_corroboration.py` | 1 each | The two hard contracts: a dead source degrades, `<2` sources can't be directional |
+
+Frontend: `StockSearchInput` 19, `ModelPicker` 14, `ResearchStudio` model wiring
+6, `ThemeToggle` 4, `TrendIndicator` 4, `PeerTable` 4, `ConfidenceBadge` 3,
+`DataGapBanner` 3.
 
 ## Resume-ready eval
 
@@ -380,6 +431,15 @@ High-severity items are fixed. Highlights:
 5. FII/DII shareholding v2 (monthly NSDL depository data)
 
 Search the codebase for `# UPDATE:` comments for smaller stubs.
+
+## Docs
+
+| Doc | What's in it |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Full state diagram, reducer semantics, critic retry contract, worker→tool map, cache table, file map |
+| [`docs/TOOLS.md`](docs/TOOLS.md) | Setup checklist: what to install, which keys, which sources are keyless |
+| [`docs/AUDIT.md`](docs/AUDIT.md) | Severity-tagged code audit — every finding, what was fixed, and which technique caught it |
+| [`docs/INTERVIEW_QA.md`](docs/INTERVIEW_QA.md) | ~200 Q&A across all 24 areas of the system, frontend and backend, grounded in the actual code |
 
 ## License
 
