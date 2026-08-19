@@ -321,8 +321,9 @@ class ResearchJobResponse(BaseModel):
     brief: Optional[ResearchBrief] = None
     compare_brief: Optional[CompareBrief] = None
     error: Optional[str] = None
-    # ticker_not_found | timeout | internal_error — lets the frontend show a
-    # tailored message instead of one generic failure state (docs/AUDIT.md #1.3)
+    # ticker_not_found | data_provider_unavailable | timeout | internal_error —
+    # lets the frontend show a tailored message instead of one generic failure
+    # state (docs/AUDIT.md #1.3)
     error_code: Optional[str] = None
     # Populated on error_code=ticker_not_found: ranked "did you mean" options
     # so a failed lookup is recoverable in one click instead of a retype.

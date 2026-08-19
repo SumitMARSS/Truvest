@@ -40,6 +40,8 @@ const QUICK_COMPARES: Array<[string, string]> = [
 
 const ERROR_MESSAGES: Record<string, string> = {
   ticker_not_found: "Couldn't resolve that to a live NSE/BSE symbol — try the exchange ticker (e.g. RELIANCE, TCS, INFY).",
+  data_provider_unavailable:
+    "Our market data provider is refusing requests right now, so this ticker couldn't be confirmed. Nothing's wrong with what you typed — try again shortly.",
   timeout: "This research job took too long and timed out. Try again — it's usually a transient slowdown upstream.",
   internal_error: "Something went wrong on our end while building this brief. Try again in a moment.",
 };

@@ -6,7 +6,12 @@ from unittest.mock import patch
 
 import pytest
 
-from app.services.ticker_resolve import TickerResolutionError, _clean_query, resolve_ticker
+from app.services.ticker_resolve import (
+    ProviderUnavailableError,
+    TickerResolutionError,
+    _clean_query,
+    resolve_ticker,
+)
 
 
 def test_clean_query_strips_exchange_prefix_and_suffix():
@@ -81,3 +86,43 @@ def test_resolve_raises_when_nothing_matches():
     ):
         with pytest.raises(TickerResolutionError):
             resolve_ticker("NOT-A-REAL-COMPANY-XYZ")
+
+
+def test_resolve_falls_back_to_catalog_when_validation_fails():
+    """Yahoo blocks shared datacenter IPs, so a hosted deploy could fail every
+    lookup — RELIANCE included — and report it as an unknown ticker. A
+    high-confidence catalog hit stands on its own; the market section degrades
+    itself later if quotes really are missing."""
+    with patch("app.services.ticker_resolve._validate", return_value={}), patch(
+        "app.services.ticker_resolve._yahoo_search_india", return_value=None
+    ):
+        out = resolve_ticker("RELIANCE")
+
+    assert out["ticker"] == "RELIANCE.NS"
+    assert out["exchange"] == "NSE"
+    assert "Reliance" in (out["company_name"] or "")
+
+
+def test_provider_outage_is_not_reported_as_unknown_ticker():
+    """Every candidate dying on the wire is an upstream failure, not a typo —
+    it must not surface as 'did you mean', which no retype can fix."""
+
+    def blocked(*_args, **_kwargs):
+        raise RuntimeError("429 Too Many Requests")
+
+    with patch("app.services.ticker_resolve.yf.Ticker", side_effect=blocked), patch(
+        "app.services.ticker_resolve._yahoo_search_india", return_value=None
+    ):
+        with pytest.raises(ProviderUnavailableError):
+            resolve_ticker("NOTAREALCOMPANYXYZ")
+
+
+def test_unknown_symbol_still_raises_ticker_not_found_when_provider_is_healthy():
+    """The provider answering "no such symbol" is a clean 200 — that path has
+    to stay distinguishable from the outage above."""
+    with patch("app.services.ticker_resolve.yf.Ticker") as ticker_cls, patch(
+        "app.services.ticker_resolve._yahoo_search_india", return_value=None
+    ):
+        ticker_cls.return_value.info = {}
+        with pytest.raises(TickerResolutionError):
+            resolve_ticker("NOTAREALCOMPANYXYZ")

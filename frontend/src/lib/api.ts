@@ -236,7 +236,12 @@ export interface ResearchJob {
   brief?: ResearchBrief | null;
   compare_brief?: CompareBrief | null;
   error?: string | null;
-  error_code?: "ticker_not_found" | "timeout" | "internal_error" | null;
+  error_code?:
+    | "ticker_not_found"
+    | "data_provider_unavailable"
+    | "timeout"
+    | "internal_error"
+    | null;
   /** Ranked "did you mean" options when a ticker could not be resolved */
   suggestions?: StockSuggestion[];
 }

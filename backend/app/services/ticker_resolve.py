@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from typing import Optional
 
 import httpx
@@ -88,6 +89,44 @@ class TickerResolutionError(ValueError):
         self.suggestions = suggestions or []
 
 
+class ProviderUnavailableError(RuntimeError):
+    """Raised when resolution failed because Yahoo refused every request, not
+    because the query was unknown.
+
+    Worth its own type: Yahoo blocks and rate-limits shared datacenter IP
+    ranges, so a deploy on Render/Fly/Heroku can fail *every* lookup —
+    RELIANCE included — while the same code resolves fine from a laptop.
+    Reporting that as "not a live NSE/BSE symbol" sends the user off hunting
+    for a better spelling of a ticker that was never the problem.
+    """
+
+
+# Per-thread tally of the last resolve_ticker() pass. Compare mode runs both
+# sides in their own threads, so a shared counter would cross-contaminate.
+_probe = threading.local()
+
+
+def _begin_probe() -> None:
+    _probe.attempts = 0
+    _probe.transport_errors = 0
+
+
+def _record_probe(*, failed: bool) -> None:
+    _probe.attempts = getattr(_probe, "attempts", 0) + 1
+    if failed:
+        _probe.transport_errors = getattr(_probe, "transport_errors", 0) + 1
+
+
+def _provider_looks_blocked() -> bool:
+    """True when every validation attempt this pass died on the wire.
+
+    A symbol that simply doesn't exist comes back as an empty-but-successful
+    response, so it never lands here.
+    """
+    attempts = getattr(_probe, "attempts", 0)
+    return attempts > 0 and getattr(_probe, "transport_errors", 0) == attempts
+
+
 def _clean_query(query: str) -> str:
     q = query.strip().upper()
     q = re.sub(r"^(NSE:|BSE:|IN:)", "", q)
@@ -138,13 +177,23 @@ def _yahoo_search_india(query: str) -> Optional[dict[str, str]]:
 
 
 def _validate(ticker: str) -> dict:
-    """Return yfinance info if the symbol is live, else {}."""
+    """Return yfinance info if the symbol is live, else {}.
+
+    Failures are logged at WARNING, not DEBUG: when the provider is blocked
+    this is the only place that knows why, and a hosted deploy running at the
+    default log level would otherwise show nothing at all for a run that
+    failed every single lookup.
+    """
     try:
         info = yf.Ticker(ticker).info or {}
         if info.get("shortName") or info.get("longName") or info.get("regularMarketPrice"):
+            _record_probe(failed=False)
             return info
+        _record_probe(failed=False)
+        logger.warning("validate %s: provider returned no usable fields", ticker)
     except Exception as exc:
-        logger.debug("validate %s failed: %s", ticker, exc)
+        _record_probe(failed=True)
+        logger.warning("validate %s failed: %s: %s", ticker, type(exc).__name__, exc)
     return {}
 
 
@@ -152,9 +201,13 @@ def resolve_ticker(query: str) -> dict[str, Optional[str]]:
     """
     Returns {"ticker": "RELIANCE.NS", "company_name": "...", "exchange": "NSE"}.
     Handles both symbols (RELIANCE, TCS.NS) and company names
-    ("Reliance Industries Ltd"). Raises TickerResolutionError when nothing matches,
-    so the pipeline fails fast instead of retrying a dead symbol.
+    ("Reliance Industries Ltd").
+
+    Raises TickerResolutionError when the query matches nothing, and
+    ProviderUnavailableError when it matched nothing only because Yahoo
+    refused to answer.
     """
+    _begin_probe()
     cleaned = _clean_query(query)
     candidates: list[str] = []
 
@@ -219,6 +272,34 @@ def resolve_ticker(query: str) -> dict[str, Optional[str]]:
             "company_name": company,
             "exchange": "BSE" if str(symbol).upper().endswith(".BO") else "NSE",
         }
+
+    # Nothing validated. A live probe is enrichment (canonical name, the
+    # exchange the symbol actually trades on) — not the authority on whether
+    # a listing exists. The bundled NSE universe already said, with high
+    # confidence, which company this is, so honour that rather than killing a
+    # run the pipeline is perfectly able to finish: the market section
+    # degrades itself honestly via MarketDataUnavailable when quotes are
+    # missing, and every other worker (news, filings, peers, shareholding)
+    # keys off the symbol alone.
+    if catalog_hit is not None:
+        logger.warning(
+            "Live validation failed for %s — falling back to the offline NSE catalog. "
+            "Market data for this run will likely be degraded.",
+            catalog_hit.ticker,
+        )
+        return {
+            "ticker": catalog_hit.ticker,
+            "company_name": catalog_hit.name,
+            "exchange": catalog_hit.exchange or "NSE",
+        }
+
+    if _provider_looks_blocked():
+        raise ProviderUnavailableError(
+            f"Yahoo Finance refused every lookup for '{query}' "
+            f"({', '.join(sorted(seen))}), so the symbol could not be confirmed. "
+            "This is an upstream/hosting problem, not a bad ticker — Yahoo rate-limits "
+            "shared datacenter IPs, which is why the same query works locally."
+        )
 
     suggestions = [s.to_dict() for s in local_suggestions(query, limit=5)]
     hint = (

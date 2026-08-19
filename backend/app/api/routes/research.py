@@ -14,7 +14,7 @@ from app.services import job_store
 from app.services.intent import detect_compare_intent
 from app.services.llm import active_model_id
 from app.services.model_catalog import validate_model
-from app.services.ticker_resolve import TickerResolutionError
+from app.services.ticker_resolve import ProviderUnavailableError, TickerResolutionError
 from app.agents.runner import run_compare_pipeline, run_research_pipeline
 
 logger = logging.getLogger(__name__)
@@ -135,6 +135,18 @@ async def _execute_job(job_id: str, query: str, model: Optional[str] = None) -> 
             suggestions=[StockSuggestion(**s) for s in getattr(exc, "suggestions", [])],
             updated_at=datetime.utcnow(),
         )
+    except ProviderUnavailableError as exc:
+        # Not the user's fault and not a bug — the quote provider is refusing
+        # us. Retyping the ticker cannot fix it, so don't offer "did you mean".
+        logger.error("Research job %s: quote provider unavailable (%s)", job_id, exc)
+        await job_store.update_job(
+            job_id,
+            status=JobStatus.failed,
+            progress="data_provider_unavailable",
+            error_code="data_provider_unavailable",
+            error=str(exc),
+            updated_at=datetime.utcnow(),
+        )
     except Exception as exc:
         logger.exception("Research job %s failed", job_id)
         await job_store.update_job(
@@ -199,6 +211,16 @@ async def _execute_compare_job(
             error_code="ticker_not_found",
             error=str(exc),
             suggestions=[StockSuggestion(**s) for s in getattr(exc, "suggestions", [])],
+            updated_at=datetime.utcnow(),
+        )
+    except ProviderUnavailableError as exc:
+        logger.error("Compare job %s: quote provider unavailable (%s)", job_id, exc)
+        await job_store.update_job(
+            job_id,
+            status=JobStatus.failed,
+            progress="data_provider_unavailable",
+            error_code="data_provider_unavailable",
+            error=str(exc),
             updated_at=datetime.utcnow(),
         )
     except Exception as exc:
