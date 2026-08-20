@@ -8,7 +8,7 @@ answer grounded in the actual code. Organised so you can revise a single area
 
 | Fact | Value |
 |---|---|
-| Backend tests | **133** (`pytest -q`, 1.8s, zero network) |
+| Backend tests | **136** (`pytest -q`, ~4s, zero network) |
 | Frontend tests | **55** across 8 files (`vitest run`, jsdom) |
 | Graph nodes | 12 (`resolve_ticker`, `planner`, 5 I/O workers, `join_workers`, `calc`, `synthesizer`, `critic`, `finalize`) |
 | Parallel I/O workers | 5 (market, news, filings, peers, shareholding) |
@@ -19,6 +19,7 @@ answer grounded in the actual code. Organised so you can revise a single area
 | Job timeout | 420s hard cap |
 | Frontend poll | 2s interval, 10-minute client-side ceiling |
 | Search debounce | 220ms |
+| Error codes | 4 (`ticker_not_found`, `data_provider_unavailable`, `timeout`, `internal_error`) |
 
 ---
 
@@ -167,7 +168,7 @@ FastAPI (:8000) ── job store: Redis if up, in-memory dict otherwise
   scoring, compliance filter, dedup, text quality.
 - `models/` — Pydantic contracts.
 
-The test suite is the proof this layering is real: 133 tests run in under two
+The test suite is the proof this layering is real: 136 tests run in under four
 seconds with **zero network access**, because everything worth testing is pure.
 
 **Q2.6 — What's the single most important design decision?**
@@ -748,15 +749,28 @@ turns that into a `400` with a readable message, and the frontend surfaces the
 message rather than a bare status code.
 
 **Q8.3 — Explain the error taxonomy.**
-Three machine-readable `error_code`s, so the UI can be specific instead of
-showing one generic failure:
+Four machine-readable `error_code`s, so the UI can be specific instead of
+showing one generic failure. The dimension they split on is **who can fix it**:
 - `ticker_not_found` — `TickerResolutionError`; the *user* mistyped. Carries
   `suggestions`, the same ranked candidates the search endpoint returns, so the
   UI renders one-click "did you mean" chips.
+- `data_provider_unavailable` — `ProviderUnavailableError`; Yahoo refused every
+  lookup. Nobody's typo, nobody's bug — the *operator* or time fixes it.
+  Deliberately carries **no** suggestions, because a retype cannot help.
 - `timeout` — exceeded 420s, with a message about free-model rate limits.
 - `internal_error` — genuine bug; logged with `logger.exception`.
-This was audit finding #1.3: previously all three were indistinguishable
-stringified errors.
+
+This started as audit finding #1.3 (all failures were indistinguishable
+stringified errors) with three codes; the fourth was added after a hosted
+deploy — see Q10.17 and Q20.11.
+
+**Q8.3b — Why is the "provider blocked" case a separate code rather than reusing `internal_error`?**
+Because `internal_error` means "we have a bug" and triggers a different human
+response: I go read a stack trace. A provider block is neither a bug nor a bad
+input — the correct response is *wait, or change the egress IP*. Collapsing them
+would mean every 429 storm from Yahoo looked, in the logs and in the UI, exactly
+like a crash in my own code. Three distinct causes deserve three distinct codes
+precisely so the on-call action differs.
 
 **Q8.4 — Why is `TickerResolutionError` a `ValueError` subclass carrying suggestions?**
 `ValueError` because an unresolvable query genuinely is a bad value. Carrying
@@ -987,12 +1001,21 @@ hand-maintained file so regenerating the catalog never destroys curation; the
 script only validates that every curated symbol still exists.
 
 **Q10.15 — How does `resolve_ticker` differ from search?**
-Search returns ranked candidates; `resolve_ticker` returns one live, validated
-ticker or raises. Its order is: hardcoded alias map (fast path) → `catalog_exact`
-(only accepts ≥0.85 confidence) → bare-symbol candidates (`X.NS`, `X.BO`) →
-Yahoo search for multi-word names. Each candidate is validated with a real
-`yf.Ticker(t).info` call before being accepted. On total failure it attaches
-`local_suggestions(query, limit=5)` to the exception.
+Search returns ranked candidates; `resolve_ticker` returns one ticker or raises.
+It builds a candidate list — hardcoded alias map (fast path) → `catalog_exact`
+(only accepts ≥0.85 confidence) → bare-symbol variants (`X.NS`, `X.BO`) → Yahoo
+search for multi-word names — then validates each with a real `yf.Ticker(t).info`
+call, taking the first that comes back live.
+
+If nothing validates there are three distinct outcomes, in this order:
+1. A high-confidence catalog hit exists → **return it anyway**, log a warning, and
+   let the market section degrade itself (Q10.18).
+2. Every validation attempt died on the wire → `ProviderUnavailableError` (Q10.19).
+3. Otherwise → `TickerResolutionError` with `local_suggestions(query, limit=5)`
+   attached for the UI's "did you mean" chips.
+
+The ordering is the design: the catalog check is first because a symbol we can
+identify offline shouldn't care *why* the probe failed.
 
 **Q10.16 — What was the `.NS`/`.BO` resolution bug?**
 Audit #9.1, and the most embarrassing one. `_clean_query` splits on dots, so
@@ -1002,6 +1025,106 @@ space is unreachable. So **every** explicitly-suffixed ticker fell through to th
 multi-word company-name search path and failed to resolve. Which meant the eval
 harness, whose testset is all `.NS` tickers, had never actually been runnable.
 Fix: hoist the re-join above the single-word test.
+
+**Q10.17 — You deployed this and every single ticker failed to resolve. What happened?**
+Yahoo Finance rate-limits and blocks **shared datacenter IP ranges**. On a laptop
+every lookup resolves; on Render/Fly/Heroku the same code, same query, gets
+refused — so `_validate("RELIANCE.NS")` returned `{}` for *everything*, no
+candidate ever validated, and the job died as `ticker_not_found`. The user-facing
+message was "Couldn't resolve that to a live NSE/BSE symbol — try the exchange
+ticker (e.g. RELIANCE…)" **for the query RELIANCE**. Telling a user their spelling
+is wrong when the spelling is perfect is the worst kind of error message: it sends
+them off to fix something that was never broken.
+
+Two independent fixes, and the ordering between them is the interesting part:
+1. **Fall back to the offline catalog** when live validation fails but the bundled
+   NSE universe already identified the company with high confidence.
+2. **Distinguish "blocked" from "unknown"** with a typed
+   `ProviderUnavailableError` → `error_code="data_provider_unavailable"`, for the
+   case where even the catalog can't help.
+
+**Q10.18 — Why is a catalog hit allowed to win when the live probe failed? Isn't that trusting stale data?**
+It's a re-reading of what the probe is *for*. The live `yf.Ticker(t).info` call is
+**enrichment** — it gives the canonical name and which exchange the symbol
+actually trades on. It is not the authority on whether a listing exists;
+`nse_universe.json`, built from NSE's own `EQUITY_L.csv`, is a better authority on
+that than an unofficial quote endpoint. So when the catalog says with ≥0.85
+confidence "RELIANCE is RELIANCE.NS, Reliance Industries Ltd", killing the whole
+job because a third party wouldn't confirm it is throwing away a run the pipeline
+can perfectly well finish.
+
+And it degrades honestly downstream, which is what makes it safe: if quotes
+really are unavailable, `fetch_market_bundle` raises `MarketDataUnavailable`, the
+market worker returns its shaped `unavailable: True` bundle, and it lands in
+`data_gaps` where the user sees it. Meanwhile news, filings, peers and
+shareholding key off the **symbol alone** — none of them needed the Yahoo probe.
+So the fallback converts "total failure" into "partial brief, labelled".
+
+**Q10.19 — How do you tell "Yahoo is blocking us" apart from "that symbol doesn't exist"?**
+By the *shape* of the failure, not its presence. A nonexistent symbol comes back
+as an **empty-but-successful** response — HTTP 200, no useful fields. A block dies
+**on the wire** — an exception out of the client. So `_validate` records which of
+the two happened for every candidate it tries:
+```python
+def _provider_looks_blocked() -> bool:
+    attempts = getattr(_probe, "attempts", 0)
+    return attempts > 0 and getattr(_probe, "transport_errors", 0) == attempts
+```
+The predicate is deliberately strict — **every** attempt this pass must have died
+on the wire. One successful "no such symbol" response proves the provider is
+reachable, which means the query really is the problem, and the code falls through
+to the normal `ticker_not_found` + suggestions path. Two tests pin exactly that
+boundary: `test_provider_outage_is_not_reported_as_unknown_ticker` (all raise →
+`ProviderUnavailableError`) and
+`test_unknown_symbol_still_raises_ticker_not_found_when_provider_is_healthy`
+(clean empty `info` → `TickerResolutionError`).
+
+**Q10.20 — Why is the probe counter `threading.local()` rather than a plain module global?**
+Same reasoning as the model-selection `ContextVar` (Q7.4), one layer down.
+Compare mode runs both sides in their own pool threads, and each calls
+`resolve_ticker` independently. A shared counter would cross-contaminate: side A's
+successful validations would mask side B's total blockage, or vice versa, and the
+outage detection would come out wrong depending on interleaving. `_begin_probe()`
+resets the tally at the top of every `resolve_ticker` call, in that call's own
+thread, so the predicate always describes exactly one resolution pass.
+
+**Q10.21 — Why is `ProviderUnavailableError` a `RuntimeError` while `TickerResolutionError` is a `ValueError`?**
+The base class encodes whose fault it is. A query that resolves to nothing
+genuinely *is* a bad value, so `ValueError` — and that's why it carries
+`suggestions`, because a bad value has plausible corrections. A blocked provider
+is an environment failure with no bad value anywhere in sight, so `RuntimeError`,
+and it deliberately carries no suggestions. If someone later writes `except
+ValueError` around resolution to mean "handle user input problems", the outage
+correctly refuses to be caught by it.
+
+**Q10.22 — You changed a log level as part of this fix. Why does that count as a fix?**
+`_validate`'s failure path logged at `debug`. A hosted deploy runs at the default
+level, so a run that failed *every single lookup* produced **no log output at
+all** — the one place in the codebase that knew why the job died was silent, and
+I was left inferring the cause from a user-facing "ticker not found". It's now
+`warning`, including `type(exc).__name__` so a 429 is distinguishable from a DNS
+failure or a TLS error at a glance. Observability of the failure path is part of
+the fix; a bug you can't see from the logs will happen twice.
+
+**Q10.23 — What's the residual risk of the catalog fallback?**
+That a symbol which was delisted or renamed *after* the last catalog rebuild now
+resolves anyway, and the user gets a brief with an honestly-empty market section
+instead of a clean "that symbol isn't live". I think that's the right trade —
+"here's what we have, here's what's missing" beats a hard stop, and it's the same
+graceful-degradation contract the rest of the project follows. The mitigations are
+that the fallback logs a warning naming the ticker, only fires on a ≥0.85
+confidence catalog hit, and shows up in the brief's `data_gaps`. The proper fix is
+a scheduled catalog rebuild (the script already exists) rather than leaning on a
+quote endpoint as a liveness check.
+
+**Q10.24 — Isn't the real fix just to get an unblocked data source?**
+Yes, and that's the honest framing: this is a mitigation for a hosting constraint,
+not a solution to it. Real options are a licensed vendor with an SLA, a proxy or
+egress IP that isn't in a flagged range, or the Alpha Vantage fallback path
+(already in `market_data.py`) promoted from optional to primary in hosted
+environments. What the fix *does* buy is that the failure is now correctly
+attributed, visible in logs, and non-fatal — so the app is usable while the data
+question gets solved properly.
 
 ---
 
@@ -1305,18 +1428,17 @@ generating them from the OpenAPI schema would be the obvious improvement, and
 
 **Q15.1 — What's your test strategy?**
 Test the pure logic exhaustively and the I/O boundaries not at all — because
-the architecture put all the load-bearing logic in pure functions. 133 backend
-tests run in 1.8 seconds with zero network. Breakdown:
+the architecture put all the load-bearing logic in pure functions. 136 backend
+tests run in under four seconds with zero network. Breakdown:
 
 | Area | Tests |
 |---|---|
 | `test_stock_search.py` | 27 |
 | `test_model_catalog.py` | 20 |
 | `test_confidence.py` | 10 |
-| `test_calc.py` | 9 |
+| `test_calc.py`, `test_ticker_resolve.py` | 9 each |
 | `test_intent.py` | 8 |
 | `test_compliance_filter.py`, `test_text_quality.py` | 7 each |
-| `test_ticker_resolve.py` | 6 |
 | `test_valuation.py`, `test_peer_data.py`, `test_sector_pe.py`, `test_critic_planner.py` | 5 each |
 | `test_dedup.py`, `test_shareholding.py`, `test_ticker_helpers.py` | 4 each |
 | `test_news_rss.py` | 3 |
@@ -1349,6 +1471,21 @@ and `test_sector_pe.py` patch the module-level fetch helper; `test_peer_data.py`
 patches `fetch_market_bundle`; `test_market_worker_degrades.py` makes it raise
 `MarketDataUnavailable` and asserts the worker still returns a well-formed
 degraded bundle with `completed_workers: ["market"]`.
+
+**Q15.4b — How do you unit-test a *provider outage* without a network?**
+Three tests in `test_ticker_resolve.py`, and they're a good example of testing a
+failure taxonomy rather than a happy path. Each patches at a different depth to
+simulate a distinct upstream behaviour:
+- `_validate` patched to return `{}` → asserts the offline catalog fallback wins
+  and `RELIANCE` still resolves to `RELIANCE.NS`.
+- `yf.Ticker` patched to **raise** → asserts `ProviderUnavailableError`.
+- `yf.Ticker` patched to return an **empty `info`** → asserts
+  `TickerResolutionError`, i.e. a healthy provider saying "no such symbol" stays
+  distinguishable from a blocked one.
+
+The last one is the test that matters most, because it's the one that fails if
+someone later "simplifies" the outage detection into "did anything resolve?".
+Both branches are asserted, so the distinction can't silently collapse.
 
 **Q15.5 — What does the eval harness measure?**
 `eval/run_eval.py` runs the real pipeline over a frozen ticker testset and scores
@@ -1460,10 +1597,31 @@ user from submitting what they typed — the free-text value stays authoritative
 and submittable regardless of what the typeahead is doing.
 
 **Q16.8 — How does the frontend handle a failed job?**
-`ERROR_MESSAGES` maps `error_code` to a human sentence. For `ticker_not_found`
-it also renders the `suggestions` the backend attached as clickable "did you
-mean" chips showing the match percentage — clicking one immediately reruns the
-research. So the failure state is a recovery affordance rather than a dead end.
+`ERROR_MESSAGES` maps `error_code` to a human sentence, with a fallback to the
+raw `error` string for an unknown code. For `ticker_not_found` — and *only* that
+code — it also renders the `suggestions` the backend attached as clickable "did
+you mean" chips showing the match percentage; clicking one immediately reruns the
+research. So the failure state is a recovery affordance rather than a dead end:
+```tsx
+job.status === "failed" && job.error_code === "ticker_not_found" ? job.suggestions || [] : []
+```
+
+**Q16.8b — Why is the suggestion gate on the error code rather than just "are there suggestions"?**
+Because chips are a *claim* that retyping will help. Under
+`data_provider_unavailable` the query was fine — the provider was refusing — so
+offering alternative spellings would be actively misleading, sending the user to
+"fix" something that isn't broken. Its copy says the opposite out loud: "Nothing's
+wrong with what you typed — try again shortly." The backend cooperates by
+attaching no suggestions to that code, so this is belt-and-braces: the UI
+wouldn't render them even if a future backend change started sending them.
+
+**Q16.8c — The `error_code` type is a TS union. What does that buy you?**
+`error_code?: "ticker_not_found" | "data_provider_unavailable" | "timeout" |
+"internal_error" | null`. When the backend added the fourth code, `tsc --noEmit`
+is what points at every place that switches on it. It's the hand-mirroring
+weakness from Q14.7 seen from the useful side: the mirror is manual, but once
+updated the compiler finds the call sites. Generating it from the OpenAPI schema
+would make the update itself automatic too.
 
 **Q16.9 — Why do the example chips fill the box instead of running a search?**
 A job takes minutes, so starting one must always be an explicit choice. Clicking
@@ -1716,7 +1874,42 @@ doesn't kill in-flight jobs; rate limiting on `/research`; per-user auth and
 quota, since jobs cost LLM tokens; structured JSON logging with a request/job id
 correlation; and licensed market-data feeds replacing the two nsepython modules.
 
-**Q19.6 — What's your logging strategy?**
+**Q19.6 — What broke when you actually deployed it? (Very likely to be asked.)**
+The single biggest surprise: **the code was environment-dependent in a way nothing
+local could reveal.** Yahoo Finance blocks shared datacenter IPs, so ticker
+resolution — step one of the pipeline, before any worker runs — failed for *every
+query* on a hosted box while passing 100% on a laptop. Not a config problem, not a
+missing key; the same bytes behaving differently because of where they ran from.
+Full write-up in Q10.17. Three lessons I'd actually name:
+1. **Free unofficial endpoints are a hosting dependency, not just a data
+   dependency.** yfinance and `nsepython` both work from a residential IP and both
+   are at the mercy of the provider's WAF from anywhere else. That belongs in the
+   deployment risk list, not the data-source list.
+2. **Every failure needs an owner in its error code.** `ticker_not_found` blamed
+   the user for an infrastructure failure. That's why there are now four codes
+   split by *who can fix it* (Q8.3).
+3. **A `debug`-level log on a failure path is a log that doesn't exist**, because
+   production doesn't run at debug (Q10.22).
+
+**Q19.7 — What would you check first if a deployed job failed for every user?**
+`GET /api/v1/health` first — it reports Redis reachability, the active job-store
+backend, the LLM provider and the server's default model, which clears or
+confirms three of the four subsystems in one request. Then the logs for
+`validate … failed:` warnings, which now name the exception type, so a 429 (rate
+limit / IP block) is distinguishable from DNS or TLS at a glance. Then the job
+record's `error_code`, which localises the failure to a stage: resolution
+(`ticker_not_found` / `data_provider_unavailable`), the pipeline (`timeout`), or
+my own code (`internal_error`).
+
+**Q19.8 — Does `/health` tell you enough?**
+Not for this class of failure, and that's a real gap I'd name. It checks Redis but
+not the *data* providers, so a Yahoo block is invisible to it — the app reports
+`status: ok` while being unable to resolve a single ticker. The obvious extension
+is a cached, cheap reachability probe per upstream (Yahoo, NSE, OpenRouter) with
+its last-success timestamp, so "healthy" means "can actually do the job" rather
+than "the process is up".
+
+**Q19.9 — What's your logging strategy?**
 Module-level `logging.getLogger(__name__)` everywhere, configured once in
 `core/logging.py` at lifespan start. Levels are used deliberately: `debug` for
 expected misses (a peer without data), `info` for degradations worth knowing
@@ -1797,6 +1990,33 @@ environment, which is how I learned that nseindia.com is unreachable from a plai
 client and that Business Standard 403s a default User-Agent. Several of these are
 only findable by reading the *contract between* two modules, not either one alone.
 
+**Q20.11 — The deploy where every ticker was "not found" (High).**
+The best story in the list, because it's the only bug that **could not be
+reproduced locally by construction**. Yahoo blocks shared datacenter IP ranges,
+so on a hosted box `_validate` failed for every candidate and the very first
+pipeline stage reported `ticker_not_found` — telling users that *RELIANCE* wasn't
+a live NSE symbol. Everything downstream was fine and never got to run.
+
+What makes it worth telling: the first instinct is "add a retry". The actual
+diagnosis was that the code was **asking the wrong question**. It treated a live
+quote lookup as the authority on whether a listing exists, when the bundled NSE
+universe — built from NSE's own `EQUITY_L.csv` — is the better authority and was
+sitting right there. So the fix wasn't resilience plumbing, it was correcting
+which source owns which fact: the probe is enrichment, the catalog is truth, and
+missing quotes degrade the market section rather than the whole job. Then, for the
+case the catalog genuinely can't answer, a typed `ProviderUnavailableError` so the
+message stops blaming the user. Three tests pin the outage-vs-typo boundary.
+
+**Q20.12 — What class of bug is that, and how would you catch it earlier?**
+It's an **environment-dependent correctness bug** — the same code, correct in one
+network position and wrong in another. Unit tests can't see it (they mock the
+network) and local runs can't see it (the network is friendly). Earlier detection
+means testing from the target environment: a post-deploy smoke check that resolves
+a known ticker and fails the deploy loudly, plus per-upstream health probes
+(Q19.8). The general lesson is that "works on my machine" has a specific,
+predictable failure mode for anything hitting an unofficial third-party endpoint,
+and the mitigation is to name that endpoint a *hosting* dependency up front.
+
 ---
 
 ## 21. Trade-offs, scale & "what would you change"
@@ -1811,6 +2031,13 @@ only findable by reading the *contract between* two modules, not either one alon
 6. A timed-out job's worker thread isn't actually killed.
 7. Peer groups cover 57 tickers, not the full universe.
 8. TypeScript types are hand-mirrored rather than generated from OpenAPI.
+9. Yahoo blocks shared datacenter IPs, so a hosted deploy runs with degraded
+   market data unless the egress IP is clean — mitigated (catalog fallback +
+   a distinct error code), not solved (Q10.17–Q10.24).
+10. `/health` checks Redis but no data provider, so it reports `ok` during an
+    upstream block (Q19.8).
+11. The catalog fallback can resolve a symbol delisted since the last catalog
+    rebuild; there's no scheduled rebuild job yet (Q10.23).
 
 **Q21.2 — Scale it to 10,000 users a day.**
 Rate-limit and authenticate `/research`; replace `BackgroundTasks` with a real
@@ -1822,9 +2049,12 @@ that's the actual unit cost.
 
 **Q21.3 — What would you build next?**
 Follow-ups, in order: (1) the graph integration test with mocked tools, (2) a
-LangGraph Redis checkpointer for durable resume, (3) SSE progress to replace
-polling, (4) NSE's corporate-announcements API for real filings instead of
-Tavily snippets, (5) FII/DII shareholding v2 from monthly NSDL data.
+market-data path that survives a hosted deploy — per-upstream health probes plus a
+post-deploy smoke check, since that's the one open issue that makes the product
+worse for *every* user rather than in one section, (3) a LangGraph Redis
+checkpointer for durable resume, (4) SSE progress to replace polling, (5) NSE's
+corporate-announcements API for real filings instead of Tavily snippets,
+(6) FII/DII shareholding v2 from monthly NSDL data.
 
 **Q21.4 — If you rewrote it, what would you do differently?**
 Generate the TypeScript client from the OpenAPI schema instead of hand-mirroring
@@ -1879,9 +2109,12 @@ any number in the brief. It's the section I'd caveat first.
 | Peer group coverage? | 57 tickers, 12 sector→index mappings |
 | Max peers per table? | 4 + the subject |
 | Price-history downsample target? | ≤240 points from ~750 |
-| Backend / frontend tests? | 133 / 55 |
+| Backend / frontend tests? | 136 / 55 |
 | Compliance rules? | 12 regex rewrite rules |
-| Error codes? | ticker_not_found, timeout, internal_error |
+| Error codes? | ticker_not_found, data_provider_unavailable, timeout, internal_error |
+| Which error code carries suggestions? | `ticker_not_found` only |
+| Provider-outage test? | every attempt dies on the wire → `ProviderUnavailableError` |
+| Resolution fallback order? | alias map → catalog (≥0.85) → `X.NS`/`X.BO` → Yahoo search → **offline catalog** → outage/not-found |
 | Cache TTLs? | shareholding 7d, sector P/E 1d (4h fallback), search 6h, models 1h, jobs 6h |
 | State reducers? | `operator.add` on `sources`/`completed_workers`, `_last_value` on `status_message` |
 
@@ -1997,14 +2230,28 @@ written into the README openly, including the fact that scraping those endpoints
 is a grey area — because a reviewer finding that themselves is far worse than me
 naming it first.
 
-**Q24.5 — What did you learn?**
+**Q24.5 — Tell me about a time something worked in development and broke in production.**
+The Yahoo datacenter-IP block (Q20.11). Ticker resolution passed every test and
+every local run, then failed 100% of queries on a hosted box — and reported it as
+"that isn't a live NSE symbol" for the query *RELIANCE*. Two things I'd highlight
+about how I handled it. First, I didn't reach for a retry loop; I asked which
+source should own the fact "does this listing exist", and the answer was the
+bundled NSE catalog, not a third-party quote endpoint — so the fix was a
+correction of authority, not added plumbing. Second, I treated the misleading
+error message as part of the bug rather than cosmetics: blaming a user for an
+infrastructure failure costs them real time, so a fourth error code and a fourth
+message went in alongside the logic. The follow-through was raising a `debug` log
+to `warning`, because the one line that knew the cause had been invisible in
+production the whole time.
+
+**Q24.6 — What did you learn?**
 That in an LLM system the hard engineering isn't the prompt — it's the
 post-conditions. Every meaningful safety property in this project (corroboration,
 compliance, prose quality, no-fabricated-tickers, no-LLM-arithmetic) is enforced
 by deterministic code *after* the model answers, because a prompt is a request
 and only code is a contract.
 
-**Q24.6 — What are you most proud of?**
+**Q24.7 — What are you most proud of?**
 That the system tells the truth when it's degraded. Anyone can build the happy
 path. Making six independent, flaky sources fail independently, keeping the brief
 useful, and having the UI say exactly what's missing and why — that's the part
